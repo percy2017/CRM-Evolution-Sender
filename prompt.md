@@ -40,6 +40,26 @@
     *   Se acordó usar el prefijo `_crm_` para metadatos internos del plugin para ocultarlos de la interfaz estándar de campos personalizados.
     *   Se usa `billing_phone` sin prefijo por compatibilidad con WooCommerce.
 
-**Estado Actual:** La lógica para identificar/crear usuarios y guardar su avatar (solo la primera vez) está implementada y probada.
-
-**Siguiente Paso Pendiente:** Implementar la función `crm_save_chat_message` para guardar los detalles del mensaje (incluyendo multimedia desde Base64) en el Custom Post Type `crm_chat`, asociándolo al `contact_user_id` (`remote_user_id`).
+**Estado Actual:**
+1.  **Gestión de Usuarios y Avatares:** La lógica para identificar/crear usuarios WP (`subscriber`) y guardar su avatar (solo en la creación) está implementada y probada.
+2.  **Guardado de Mensajes:** La lógica para guardar los detalles del mensaje (incluyendo multimedia desde Base64) en el Custom Post Type `crm_chat`, asociándolo al `contact_user_id` (como `post_author` y metadato `_crm_contact_user_id`), está implementada y probada.
+3.  **Interfaz Historial de Chats (Estilo WhatsApp Web):**
+    *   Se creó un submenú "Historial Chats" bajo "CRM Evolution".
+    *   Se creó un archivo dedicado `crm-chat-history.php` para la página.
+    *   Se implementó la estructura HTML de dos columnas (lista de chats | mensajes).
+    *   Se añadieron estilos CSS básicos para el layout, la lista de chats y las burbujas de mensajes.
+    *   Se implementó la carga AJAX de la lista de conversaciones (izquierda), mostrando:
+        *   Avatar del contacto.
+        *   Nombre del contacto.
+        *   Snippet del último mensaje (con prefijo para media).
+        *   Hora del último mensaje.
+        *   Nombre de la instancia.
+    *   Se implementó la carga AJAX de los mensajes de la conversación seleccionada (derecha), mostrando:
+        *   Burbujas de chat diferenciadas (entrante/saliente).
+        *   Contenido de texto.
+        *   Imágenes, videos y enlaces a documentos adjuntos.
+        *   Hora del mensaje.
+        *   Scroll automático al último mensaje.
+4.  **Manejo de Eliminación de Usuario:**
+    *   Al eliminar un usuario WP y elegir "Borrar todo el contenido", se eliminan correctamente los posts `crm_chat` asociados (porque `post_author` es el `contact_user_id`).
+    *   Se implementó una función (`crm_delete_user_avatar_on_user_delete` en `crm-evolution-sender.php`) enganchada a `delete_user` para eliminar el archivo de avatar de la Biblioteca de Medios.

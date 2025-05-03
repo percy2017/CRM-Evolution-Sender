@@ -30,6 +30,7 @@ require_once CRM_EVOLUTION_SENDER_PLUGIN_DIR . 'crm-setting.php';
 require_once CRM_EVOLUTION_SENDER_PLUGIN_DIR . 'crm-ajax-handlers.php';
 require_once CRM_EVOLUTION_SENDER_PLUGIN_DIR . 'crm-rest-api.php';
 require_once CRM_EVOLUTION_SENDER_PLUGIN_DIR . 'crm-cpt-chat.php';
+require_once CRM_EVOLUTION_SENDER_PLUGIN_DIR . 'crm-chat-history.php';
 
 
 
@@ -87,6 +88,16 @@ function crm_evolution_sender_admin_menu() {
         'edit.php?post_type=crm_chat',                   // Slug: URL directa a la lista del CPT
         null                                             // No necesita función de callback, WP maneja edit.php
     );
+    // --- Submenú para Historial de Chats Estilo WhatsApp ---
+    add_submenu_page(
+        'crm-evolution-sender-main',                     // Slug del menú padre
+        __( 'Historial de Chats CRM', CRM_EVOLUTION_SENDER_TEXT_DOMAIN ), // Título de la página
+        __( 'Historial Chats', CRM_EVOLUTION_SENDER_TEXT_DOMAIN ),       // Título del submenú
+        'edit_posts',                                    // Capacidad requerida (ver chats)
+        'crm-evolution-chat-history',                    // Slug de este submenú
+        'crm_evolution_sender_chat_history_page_html'    // Función que muestra el contenido (de crm-chat-history.php)
+    );
+    
     
 }
 add_action( 'admin_menu', 'crm_evolution_sender_admin_menu' );
@@ -101,7 +112,8 @@ function crm_evolution_sender_enqueue_assets( $hook ) {
     // Ajuste: El hook para submenús incluye el slug del menú padre
     $plugin_pages = [
         'toplevel_page_crm-evolution-sender-main',
-        'crm-evolution_page_crm-evolution-sender-settings' // Hook para la página de ajustes
+        'crm-evolution_page_crm-evolution-sender-settings', // Hook para la página de ajustes
+        'crm-evolution_page_crm-evolution-chat-history'     // Hook para la nueva página de historial de chats
     ];
     if ( ! in_array($hook, $plugin_pages) ) {
         return;
@@ -283,9 +295,26 @@ function crm_evolution_use_media_library_avatar( $args, $id_or_email ) {
 }
 add_filter( 'get_avatar_data', 'crm_evolution_use_media_library_avatar', 10, 2 );
 
+/**
+ * Elimina el archivo de avatar de la Biblioteca de Medios cuando se elimina un usuario.
+ *
+ * @param int $user_id ID del usuario que se está eliminando.
+ */
+function crm_delete_user_avatar_on_user_delete( $user_id ) {
+    crm_log( "Hook 'delete_user' activado para User ID: {$user_id}. Buscando avatar asociado.", 'INFO' );
 
+    // Obtener el ID del adjunto del avatar guardado en los metadatos del usuario
+    $attachment_id = get_user_meta( $user_id, '_crm_avatar_attachment_id', true );
 
-
-
+    if ( ! empty( $attachment_id ) && is_numeric( $attachment_id ) ) {
+        crm_log( "Avatar encontrado (Attachment ID: {$attachment_id}). Intentando eliminarlo permanentemente.", 'INFO' );
+        // Eliminar el adjunto permanentemente (el segundo parámetro true fuerza la eliminación, sin pasar por la papelera)
+        $deleted = wp_delete_attachment( $attachment_id, true );
+        crm_log( $deleted ? "Avatar (Attachment ID: {$attachment_id}) eliminado con éxito." : "Fallo al eliminar el avatar (Attachment ID: {$attachment_id}).", $deleted ? 'INFO' : 'ERROR' );
+    } else {
+        crm_log( "No se encontró avatar asociado para eliminar para User ID: {$user_id}.", 'INFO' );
+    }
+}
+add_action( 'delete_user', 'crm_delete_user_avatar_on_user_delete', 10, 1 ); // El 1 indica que la función acepta 1 argumento ($user_id)
 
 ?>

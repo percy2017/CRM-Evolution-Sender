@@ -1106,13 +1106,199 @@
         // --- FIN: Lógica para Pestaña Marketing ---
 
 
+
+
         // Inicializar los manejadores de eventos generales (YA EXISTENTE)
         // Asegúrate de que initEventHandlers() no duplique los manejadores que acabamos de poner aquí.
         // Si initEventHandlers() ya maneja los botones de media o el submit del form, quita el código duplicado de allí.
         initEventHandlers();
 
+        // --- INICIO: Lógica para Historial de Chats ---
+        // Solo ejecutar en la página de historial de chats
+        if ($('#crm-chat-container').length) {
+            crm_js_log('Página de Historial de Chats detectada. Cargando conversaciones...');
+            loadRecentConversations();
+        }
+        // --- FIN: Lógica para Historial de Chats ---
+
+
         crm_js_log('Script del plugin CRM Evolution Sender inicializado completamente.');
     }); // Fin de $(document).ready
    
+    /**
+     * =========================================================================
+     * == HISTORIAL DE CHATS (Funciones) ==
+     * =========================================================================
+     */
+
+    /**
+     * Carga la lista de conversaciones recientes vía AJAX.
+     * (Esta función ahora está fuera del document.ready, pero se llama desde dentro)
+     */
+    function loadRecentConversations() {
+        const $ = jQuery; // Asegurar que $ es jQuery dentro de esta función
+        const chatListContainer = $('#chat-list-items');
+        // Usar el texto directamente aquí o pasarlo como parámetro si se necesita traducción compleja
+        chatListContainer.html('<p><span class="spinner is-active" style="float: none; vertical-align: middle;"></span> Cargando conversaciones...</p>'); // Mostrar spinner
+
+        $.ajax({
+            url: crm_evolution_sender_params.ajax_url,
+            type: 'POST',
+            data: {
+                action: 'crm_get_recent_conversations', // Acción registrada en PHP
+                _ajax_nonce: crm_evolution_sender_params.nonce // Nonce de seguridad
+            },
+            success: function(response) {
+                chatListContainer.empty(); // Limpiar el contenedor
+
+                if (response.success && response.data.length > 0) {
+                    crm_js_log('Conversaciones recibidas:', response.data);
+                    response.data.forEach(function(convo) {
+                        const lastMessageDate = new Date(convo.last_message_timestamp * 1000);
+                        const timeString = lastMessageDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+                        const chatItemHtml = `
+                            <div class="chat-list-item" data-user-id="${convo.user_id}">
+                                <img src="${convo.avatar_url}" alt="${escapeHtml(convo.display_name)}" class="chat-avatar">
+                                <div class="chat-item-details">
+                                    <div class="chat-item-header">
+                                        <span class="chat-item-name">${escapeHtml(convo.display_name)}</span>
+                                        <span class="chat-item-time">${timeString}</span>
+                                    </div>
+                                    <div class="chat-item-snippet">
+                                        ${escapeHtml(convo.last_message_snippet)}
+                                        <span class="chat-item-instance">(${escapeHtml(convo.instance_name)})</span>
+                                    </div>
+                                </div>
+                            </div>
+                        `;
+                        chatListContainer.append(chatItemHtml);
+                    });
+
+                    // Aquí añadiremos el manejador de click a los nuevos items
+                    addChatListItemClickHandler();
+
+                } else if (response.success && response.data.length === 0) { // Corregido: usar ===
+                    chatListContainer.html('<p>No se encontraron conversaciones recientes.</p>');
+                } else {
+                    crm_js_log('Error al cargar conversaciones:', 'ERROR', response.data.message);
+                    chatListContainer.html('<p class="error-message">Error al cargar conversaciones. ' + escapeHtml(response.data.message || '') + '</p>');
+                }
+            },
+            error: function(jqXHR, textStatus, errorThrown) {
+                crm_js_log('Error AJAX al cargar conversaciones:', 'ERROR', { status: textStatus, error: errorThrown });
+                chatListContainer.empty(); // Limpiar
+                chatListContainer.html('<p class="error-message">Error de conexión al cargar conversaciones.</p>');
+            }
+        });
+    }
+
+    /**
+     * Añade el manejador de clicks a los items de la lista de chat usando delegación.
+     */
+    function addChatListItemClickHandler() {
+        const $ = jQuery;
+        // Usar .off().on() para evitar múltiples bindings si se llama varias veces
+        $('#chat-list-items').off('click', '.chat-list-item').on('click', '.chat-list-item', function() {
+            const userId = $(this).data('user-id');
+            crm_js_log(`Click en chat item. User ID: ${userId}`);
+
+            // Marcar como activo
+            $('#chat-list-items .chat-list-item').removeClass('active');
+            $(this).addClass('active');
+
+            // Cargar mensajes
+            loadConversationMessages(userId);
+        });
+    }
+
+    /**
+     * Carga los mensajes para una conversación específica vía AJAX.
+     * @param {number} userId El ID del usuario WP cuya conversación cargar.
+     */
+    function loadConversationMessages(userId) {
+        const $ = jQuery;
+        const messagesContainer = $('#chat-messages-column');
+        messagesContainer.html('<p><span class="spinner is-active" style="float: none; vertical-align: middle;"></span> Cargando mensajes...</p>'); // Mostrar spinner
+
+        crm_js_log(`Solicitando mensajes para User ID: ${userId}`);
+
+        $.ajax({
+            url: crm_evolution_sender_params.ajax_url,
+            type: 'POST',
+            data: {
+                action: 'crm_get_conversation_messages', // Nueva acción PHP
+                _ajax_nonce: crm_evolution_sender_params.nonce,
+                user_id: userId
+            },
+            success: function(response) {
+                crm_js_log(`Respuesta recibida para mensajes de User ID ${userId}:`, 'DEBUG', response);
+                messagesContainer.empty(); // Limpiar contenedor
+
+                if (response.success && Array.isArray(response.data) && response.data.length > 0) {
+                    response.data.forEach(function(msg) {
+                        const messageDate = new Date(msg.timestamp * 1000);
+                        const timeString = messageDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                        const messageClass = msg.is_outgoing ? 'chat-message outgoing' : 'chat-message incoming';
+
+                        let messageContentHtml = '';
+
+                        // Manejar diferentes tipos de mensajes
+                        if (msg.type === 'image' && msg.attachment_url) {
+                            messageContentHtml = `
+                                <div class="message-media">
+                                    <a href="${escapeHtml(msg.attachment_url)}" target="_blank" title="Ver imagen completa">
+                                        <img src="${escapeHtml(msg.attachment_url)}" alt="Imagen adjunta" loading="lazy">
+                                    </a>
+                                </div>
+                                ${msg.caption ? `<div class="message-caption">${escapeHtml(msg.caption)}</div>` : ''}
+                            `;
+                        } else if (msg.type === 'video' && msg.attachment_url) {
+                             messageContentHtml = `
+                                <div class="message-media">
+                                    <video controls preload="metadata" src="${escapeHtml(msg.attachment_url)}"></video>
+                                </div>
+                                ${msg.caption ? `<div class="message-caption">${escapeHtml(msg.caption)}</div>` : ''}
+                            `;
+                        } else if (msg.type === 'document' && msg.attachment_url) {
+                             messageContentHtml = `
+                                <div class="message-document">
+                                    <a href="${escapeHtml(msg.attachment_url)}" target="_blank" download>
+                                        <span class="dashicons dashicons-media-default"></span> ${escapeHtml(msg.caption || msg.attachment_url.split('/').pop())}
+                                    </a>
+                                </div>`;
+                        } else { // Texto o tipo desconocido
+                            messageContentHtml = `<div class="message-text">${escapeHtml(msg.text || msg.caption || '')}</div>`;
+                        }
+
+                        const messageHtml = `
+                            <div class="${messageClass}">
+                                <div class="message-bubble">
+                                    ${messageContentHtml}
+                                    <div class="message-time">${timeString}</div>
+                                </div>
+                            </div>
+                        `;
+                        messagesContainer.append(messageHtml);
+                    });
+
+                    // Hacer scroll hasta el último mensaje
+                    messagesContainer.scrollTop(messagesContainer[0].scrollHeight);
+
+                } else if (response.success && response.data.length === 0) {
+                    messagesContainer.html('<p class="no-messages">No hay mensajes en esta conversación.</p>');
+                } else {
+                    crm_js_log(`Error en la respuesta AJAX al cargar mensajes para User ID ${userId}:`, 'ERROR', response.data.message);
+                    messagesContainer.html('<p class="error-message">Error al cargar los mensajes. ' + escapeHtml(response.data.message || '') + '</p>');
+                }
+            },
+            error: function(jqXHR, textStatus, errorThrown) {
+                crm_js_log(`Error AJAX al cargar mensajes para User ID ${userId}:`, 'ERROR', { status: textStatus, error: errorThrown });
+                messagesContainer.html('<p class="error-message">Error de conexión al cargar mensajes.</p>');
+            }
+        });
+    }
+
+
 
 })(jQuery); // Fin de la encapsulación

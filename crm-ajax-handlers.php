@@ -855,3 +855,159 @@ function crm_ajax_save_campaign_callback() {
 }
 add_action( 'wp_ajax_crm_save_campaign', 'crm_ajax_save_campaign_callback' );
 
+// =========================================================================
+// == MANEJADORES AJAX - HISTORIAL DE CHATS ==
+// =========================================================================
+
+/**
+ * AJAX Handler para obtener la lista de conversaciones recientes para la interfaz de chat.
+ */
+function crm_get_recent_conversations_ajax() {
+    crm_log( 'Recibida petición AJAX: crm_get_recent_conversations' );
+
+    // 1. Verificar Nonce y Permisos
+    check_ajax_referer( 'crm_evolution_sender_nonce', '_ajax_nonce' );
+    // Usar 'edit_posts' ya que es la capacidad que dimos al menú de chats
+    if ( ! current_user_can( 'edit_posts' ) ) {
+        crm_log( 'Error AJAX: Permiso denegado para crm_get_recent_conversations.', 'ERROR' );
+        wp_send_json_error( array( 'message' => 'No tienes permisos suficientes.' ), 403 );
+    }
+
+    // 2. Obtener los últimos mensajes de chat
+    $args = array(
+        'post_type'      => 'crm_chat',
+        'posts_per_page' => 200, // Limitar inicialmente para rendimiento, ajustar si es necesario
+        'orderby'        => 'date', // Ordenar por fecha de creación del post (que se basa en timestamp_wa)
+        'order'          => 'DESC',
+        'meta_query'     => array(
+            // Asegurarnos de que solo consideramos chats asociados a un usuario WP
+            // Opcional: podríamos manejar chats sin user_id (grupos?) más adelante
+            array(
+                'key'     => '_crm_contact_user_id',
+                'value'   => 0,
+                'compare' => '>', // Solo IDs mayores que 0
+                'type'    => 'NUMERIC',
+            ),
+        ),
+    );
+
+    $query = new WP_Query( $args );
+
+    $conversations = array();
+    $processed_user_ids = array();
+
+    // 3. Procesar los mensajes para obtener la última entrada de cada conversación
+    if ( $query->have_posts() ) {
+        crm_log( "Procesando {$query->post_count} mensajes recientes para obtener conversaciones." );
+        while ( $query->have_posts() ) {
+            $query->the_post();
+            $post_id = get_the_ID();
+            $contact_user_id = get_post_meta( $post_id, '_crm_contact_user_id', true );
+
+            // Si es un ID válido y no hemos procesado ya esta conversación
+            if ( $contact_user_id > 0 && ! in_array( $contact_user_id, $processed_user_ids ) ) {
+                $processed_user_ids[] = $contact_user_id; // Marcar como procesado
+
+                $user_data = get_userdata( $contact_user_id );
+                if ( $user_data ) {
+                    $last_message_text = get_the_content();
+                    $media_caption = get_post_meta( $post_id, '_crm_media_caption', true );
+                    $message_type = get_post_meta( $post_id, '_crm_message_type', true );
+                    $instance_name = get_post_meta( $post_id, '_crm_instance_name', true ); // <-- Obtener nombre de instancia
+
+                    // Snippet: Usar caption si es media, sino el texto. Añadir prefijo si es media.
+                    $snippet = '';
+                    if ( in_array($message_type, ['image', 'video', 'audio', 'document', 'file']) ) {
+                        $snippet = '[' . ucfirst($message_type) . '] '; // Ej: [Image]
+                        $snippet .= $media_caption ?: '';
+                    } else {
+                        $snippet = $last_message_text;
+                    }
+
+                    $conversations[] = array(
+                        'user_id'      => $contact_user_id,
+                        'display_name' => $user_data->display_name,
+                        'avatar_url'   => get_avatar_url( $contact_user_id, ['size' => 96] ), // Obtener URL del avatar
+                        'last_message_snippet' => wp_trim_words( $snippet, 10, '...' ), // Cortar snippet largo
+                        'last_message_timestamp' => (int) get_post_meta( $post_id, '_crm_timestamp_wa', true ),
+                        'instance_name' => $instance_name ?: 'N/D', // <-- Añadir al array de respuesta
+                    );
+                }
+            }
+        }
+        wp_reset_postdata();
+    }
+
+    crm_log( "Enviando " . count($conversations) . " conversaciones únicas al frontend.", 'INFO' );
+    wp_send_json_success( $conversations );
+}
+add_action( 'wp_ajax_crm_get_recent_conversations', 'crm_get_recent_conversations_ajax' );
+
+/**
+ * AJAX Handler para obtener los mensajes de una conversación específica.
+ */
+function crm_get_conversation_messages_ajax() {
+    crm_log( 'Recibida petición AJAX: crm_get_conversation_messages' );
+
+    // 1. Verificar Nonce y Permisos
+    check_ajax_referer( 'crm_evolution_sender_nonce', '_ajax_nonce' );
+    if ( ! current_user_can( 'edit_posts' ) ) {
+        crm_log( 'Error AJAX: Permiso denegado para crm_get_conversation_messages.', 'ERROR' );
+        wp_send_json_error( array( 'message' => 'No tienes permisos suficientes.' ), 403 );
+    }
+
+    // 2. Obtener y validar User ID
+    $user_id = isset( $_POST['user_id'] ) ? absint( $_POST['user_id'] ) : 0;
+    if ( $user_id <= 0 ) {
+        crm_log( 'Error AJAX: User ID inválido o no proporcionado para crm_get_conversation_messages.', 'ERROR' );
+        wp_send_json_error( array( 'message' => 'ID de usuario inválido.' ), 400 );
+    }
+
+    crm_log( "Obteniendo mensajes para User ID: {$user_id}" );
+
+    // 3. Obtener los mensajes de chat para ese usuario
+    $args = array(
+        'post_type'      => 'crm_chat',
+        'posts_per_page' => -1, // Obtener todos los mensajes de esta conversación
+        'orderby'        => 'meta_value_num', // Ordenar por el timestamp numérico
+        'meta_key'       => '_crm_timestamp_wa', // La clave por la que ordenar
+        'order'          => 'ASC', // Orden ascendente (más antiguo primero)
+        'meta_query'     => array(
+            array(
+                'key'     => '_crm_contact_user_id',
+                'value'   => $user_id,
+                'compare' => '=',
+                'type'    => 'NUMERIC',
+            ),
+        ),
+    );
+
+    $query = new WP_Query( $args );
+    $messages = array();
+
+    // 4. Procesar los mensajes
+    if ( $query->have_posts() ) {
+        crm_log( "Procesando {$query->post_count} mensajes para User ID: {$user_id}." );
+        while ( $query->have_posts() ) {
+            $query->the_post();
+            $post_id = get_the_ID();
+            $attachment_id = get_post_meta( $post_id, '_crm_media_attachment_id', true );
+
+            $messages[] = array(
+                'id'            => $post_id,
+                'text'          => get_the_content(), // Contenido principal (texto o caption si se guardó ahí)
+                'timestamp'     => (int) get_post_meta( $post_id, '_crm_timestamp_wa', true ),
+                'is_outgoing'   => (bool) get_post_meta( $post_id, '_crm_is_outgoing', true ),
+                'type'          => get_post_meta( $post_id, '_crm_message_type', true ),
+                'caption'       => get_post_meta( $post_id, '_crm_media_caption', true ), // Caption específico
+                'attachment_id' => $attachment_id ? (int) $attachment_id : null,
+                'attachment_url'=> $attachment_id ? wp_get_attachment_url( $attachment_id ) : null, // URL del adjunto
+            );
+        }
+        wp_reset_postdata();
+    }
+
+    crm_log( "Enviando " . count($messages) . " mensajes para User ID: {$user_id} al frontend.", 'INFO' );
+    wp_send_json_success( $messages );
+}
+add_action( 'wp_ajax_crm_get_conversation_messages', 'crm_get_conversation_messages_ajax' );

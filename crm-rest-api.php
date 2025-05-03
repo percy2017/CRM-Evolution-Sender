@@ -43,7 +43,7 @@ function crm_evolution_webhook_handler_callback( WP_REST_Request $request ) {
     // Obtener los datos JSON enviados por Evolution API
     $data = $request->get_json_params();
     error_log('Webhook recibido - '. print_r( $data, true ));
-
+   
     // Extraer Evento e Instancia
     $event = isset($data['event']) ? $data['event'] : 'evento_desconocido';
     $instance = isset($data['instance']) ? $data['instance'] : 'instancia_desconocida';
