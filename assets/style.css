@@ -124,7 +124,6 @@
 }
 
 /* --- FIN ESTILOS DESDE CERO Modal Añadir Instancia --- */
-
 /* ==========================================================================
    ESTILOS para Historial de Chats
    ========================================================================== */
@@ -163,37 +162,20 @@
     padding: 10px 0; /* Espacio arriba/abajo */
 }
 
-.crm-chat-history-page .chat-messages-column {
-    flex-grow: 1; /* Ocupa el espacio restante */
-    padding: 20px;
-    overflow-y: auto; /* Scroll si los mensajes son muchos */
-    background-color: #e5ddd5; /* Fondo tipo WhatsApp */
-    /* Podríamos añadir una imagen de fondo aquí */
-    display: flex; /* Para centrar el mensaje inicial */
-    justify-content: center;
-    align-items: center;
-}
+/* --- Estilos Lista de Chats --- */
 
-.crm-chat-history-page .no-chat-selected {
-    color: #50575e;
-    font-size: 1.1em;
-    text-align: center;
-    background-color: #fff;
-    padding: 20px;
-    border-radius: 5px;
-    box-shadow: 0 1px 1px rgba(0,0,0,0.05);
-}
-
-/* Estilos para los items individuales de la lista de chats */
 .crm-chat-history-page .chat-list-item {
     display: flex;
     align-items: center;
     padding: 10px 15px;
     border-bottom: 1px solid #f0f0f1; /* Separador más suave */
     cursor: pointer;
-    transition: background-color 0.2s ease;
+    transition: background-color 0.15s ease;
 }
 
+.crm-chat-history-page .chat-list-item:last-child {
+    border-bottom: none;
+}
 .crm-chat-history-page .chat-list-item:hover {
     background-color: #f5f5f5; /* Fondo al pasar el mouse */
 }
@@ -218,12 +200,26 @@
 .crm-chat-history-page .chat-item-header {
     display: flex;
     justify-content: space-between; /* Nombre a la izq, hora a la der */
+    align-items: center; /* Centrar verticalmente */
     margin-bottom: 4px;
+}
+
+/* Estilo para el nombre de la instancia en la lista de chats */
+.crm-chat-history-page .chat-item-header .chat-item-instance { /* Estilo cuando está en el header */
+    font-weight: 600; /* Más grueso */
+    color: #0073aa; /* Azul WordPress */
+    font-size: 0.9em;
+    margin-right: 8px; /* Espacio antes del nombre */
+    flex-shrink: 0; /* Evita que se encoja si el nombre es largo */
 }
 
 .crm-chat-history-page .chat-item-name {
     font-weight: 600;
     color: #111b21; /* Color oscuro para el nombre */
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    flex-grow: 1; /* Ocupa espacio disponible */
 }
 
 .crm-chat-history-page .chat-item-time {
@@ -231,6 +227,7 @@
     color: #667781; /* Color grisáceo para la hora */
     margin-left: 10px; /* Espacio entre nombre y hora */
     white-space: nowrap; /* Evita que la hora se parta */
+    flex-shrink: 0; /* Evita que se encoja */
 }
 
 .crm-chat-history-page .chat-item-snippet {
@@ -239,13 +236,6 @@
     white-space: nowrap; /* Evita que el snippet se parta */
     overflow: hidden;
     text-overflow: ellipsis; /* Añade "..." si el texto es muy largo */
-}
-
-/* Estilo para el nombre de la instancia en la lista de chats */
-.crm-chat-history-page .chat-item-instance {
-    font-size: 0.85em; /* Un poco más pequeño */
-    color: #8a99a4; /* Color gris más claro */
-    margin-left: 5px; /* Espacio respecto al snippet */
 }
 
 /* Estilos para mensajes de error o carga en la lista */
@@ -263,15 +253,40 @@
 }
 
 /* ==========================================================================
-   ESTILOS para Burbujas de Mensajes
+   ESTILOS para Vista de Chat (Mensajes e Input)
    ========================================================================== */
 
-.crm-chat-history-page .chat-messages-column {
-    /* Ajustes para mostrar mensajes desde arriba */
-    align-items: flex-start; /* Alinea items al inicio (arriba) */
-    justify-content: flex-start; /* Contenido empieza desde arriba */
-    flex-direction: column; /* Apila los mensajes verticalmente */
+.crm-chat-history-page .chat-view-column { /* Contenedor de mensajes e input */
+    flex-grow: 1; /* Ocupa el espacio restante */
+    display: flex;
+    flex-direction: column; /* Apila mensajes arriba, input abajo */
+    background-color: #e5ddd5; /* Fondo tipo WhatsApp */
+    /* Podríamos añadir una imagen de fondo aquí con background-image */
+    overflow: hidden; /* Evita que el input se salga */
 }
+
+.crm-chat-history-page .chat-messages-area { /* Área donde van las burbujas */
+    flex-grow: 1; /* Ocupa todo el espacio vertical disponible */
+    padding: 20px;
+    overflow-y: auto; /* Scroll si los mensajes son muchos */
+    display: flex; /* Para centrar el mensaje inicial */
+    flex-direction: column; /* Apila los mensajes verticalmente */
+    justify-content: flex-start; /* Mensajes empiezan desde arriba */
+}
+
+.crm-chat-history-page .no-chat-selected { /* Estilo para el mensaje inicial */
+    color: #50575e;
+    font-size: 1.1em;
+    text-align: center;
+    background-color: #fff;
+    padding: 20px;
+    border-radius: 5px;
+    box-shadow: 0 1px 1px rgba(0,0,0,0.05);
+    margin: auto; /* Centrar el bloque */
+}
+
+
+/* --- Estilos Burbujas de Mensajes --- */
 
 .crm-chat-history-page .chat-message {
     display: flex; /* Usa flex para alinear burbuja */
@@ -351,15 +366,48 @@
 }
 
 /* Estilos para mensajes de carga/error en la columna de mensajes */
-.crm-chat-history-page .chat-messages-column > p { /* Estilo para los párrafos directos */
+.crm-chat-history-page .chat-messages-area > p { /* Estilo para los párrafos directos */
     width: 100%;
     text-align: center;
     margin-top: 50px; /* Espacio superior */
     color: #667781;
 }
-.crm-chat-history-page .chat-messages-column > p.error-message {
+.crm-chat-history-page .chat-messages-area > p.error-message {
     color: #d33;
 }
-.crm-chat-history-page .chat-messages-column > p .spinner {
+.crm-chat-history-page .chat-messages-area > p .spinner {
     margin-right: 5px;
+}
+
+/* Estilos para el área de input de mensaje */
+.crm-chat-history-page .chat-input-area {
+    display: flex;
+    align-items: center; /* Centra verticalmente los elementos */
+    padding: 10px 15px;
+    background-color: #f0f0f1; /* Fondo gris claro */
+    border-top: 1px solid #dcdcdc;
+}
+
+.crm-chat-history-page .chat-input-area .btn-attach {
+    margin-right: 10px;
+    padding: 5px; /* Ajustar padding */
+    line-height: 1; /* Ajustar altura línea */
+}
+
+.crm-chat-history-page .chat-input-area textarea {
+    flex-grow: 1; /* Ocupa el espacio restante */
+    border-radius: 18px; /* Bordes redondeados */
+    padding: 8px 12px;
+    border: 1px solid #dcdcdc;
+    resize: none; /* Evitar que se pueda redimensionar */
+    max-height: 100px; /* Limitar altura máxima si crece */
+    margin-right: 10px;
+    line-height: 1.4;
+    /* Opcional: transiciones suaves si el textarea crece */
+    /* transition: height 0.1s ease-out; */
+}
+
+.crm-chat-history-page .chat-input-area .btn-send {
+    padding: 5px; /* Ajustar padding */
+    line-height: 1; /* Ajustar altura línea */
 }

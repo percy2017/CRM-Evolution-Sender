@@ -31,9 +31,16 @@ function crm_evolution_sender_chat_history_page_html() {
                     <p><?php esc_html_e( 'Cargando conversaciones...', CRM_EVOLUTION_SENDER_TEXT_DOMAIN ); ?></p>
                 </div>
             </div>
-            <div id="chat-messages-column" class="chat-messages-column">
-                <p class="no-chat-selected"><?php esc_html_e( 'Selecciona un chat para ver los mensajes.', CRM_EVOLUTION_SENDER_TEXT_DOMAIN ); ?></p>
-                <!-- Aquí se cargarán los mensajes de la conversación seleccionada -->
+            <div id="chat-view-column" class="chat-view-column"> <!-- Cambiado ID para claridad -->
+                <div id="chat-messages-area" class="chat-messages-area">
+                    <p class="no-chat-selected"><?php esc_html_e( 'Selecciona un chat para ver los mensajes.', CRM_EVOLUTION_SENDER_TEXT_DOMAIN ); ?></p>
+                    <!-- Aquí se cargarán los mensajes -->
+                </div>
+                <div id="chat-input-area" class="chat-input-area" style="display: none;"> <!-- Oculto inicialmente -->
+                    <button class="button button-secondary btn-attach" title="Adjuntar (Próximamente)"><span class="dashicons dashicons-paperclip"></span></button>
+                    <textarea id="chat-message-input" placeholder="<?php esc_attr_e( 'Escribe un mensaje aquí...', CRM_EVOLUTION_SENDER_TEXT_DOMAIN ); ?>" rows="1"></textarea>
+                    <button id="send-message-button" class="button button-primary btn-send" title="Enviar Mensaje"><span class="dashicons dashicons-arrow-right-alt"></span></button>
+                </div>
             </div>
         </div>
 

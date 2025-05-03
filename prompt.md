@@ -63,3 +63,17 @@
 4.  **Manejo de Eliminación de Usuario:**
     *   Al eliminar un usuario WP y elegir "Borrar todo el contenido", se eliminan correctamente los posts `crm_chat` asociados (porque `post_author` es el `contact_user_id`).
     *   Se implementó una función (`crm_delete_user_avatar_on_user_delete` en `crm-evolution-sender.php`) enganchada a `delete_user` para eliminar el archivo de avatar de la Biblioteca de Medios.
+5.  **Actualización Automática de Chats (Heartbeat):**
+    *   Se utiliza la API Heartbeat de WordPress.
+    *   JS envía el timestamp del último chequeo general (`lastChatCheckTimestamp`) y, si un chat está abierto, su `userId` (`currentOpenChatUserId`) y el timestamp del último mensaje mostrado (`lastDisplayedMessageTimestamp`).
+    *   PHP (`crm_handle_heartbeat_request`) comprueba si hay mensajes nuevos para el chat abierto o mensajes nuevos en general.
+    *   PHP devuelve los mensajes nuevos para el chat abierto (en `crm_new_messages_for_open_chat`) y/o un flag si la lista general necesita refrescarse (`crm_needs_list_refresh`).
+    *   JS (`heartbeat-tick`) procesa la respuesta: añade mensajes nuevos al chat abierto o recarga la lista de conversaciones.
+6.  **Envío de Mensajes desde Historial (Análisis):**
+    *   Se añadió el área HTML/CSS para el input de texto y botones de adjuntar/enviar, oculta por defecto y visible al seleccionar un chat.
+    *   **Plan:**
+        *   Guardar `instance_name` y `jid` del chat activo en JS.
+        *   Usar `wp.media` para el botón de adjuntar.
+        *   Crear acción AJAX (`crm_send_chat_message`) para enviar datos al backend.
+        *   Backend llamará a la API Evolution (`/message/sendText` o `/message/sendMedia`) y luego a `crm_save_chat_message` para guardar el mensaje saliente.
+        *   El Heartbeat mostrará el mensaje enviado en la interfaz.

@@ -1011,3 +1011,122 @@ function crm_get_conversation_messages_ajax() {
     wp_send_json_success( $messages );
 }
 add_action( 'wp_ajax_crm_get_conversation_messages', 'crm_get_conversation_messages_ajax' );
+
+// =========================================================================
+// == API HEARTBEAT PARA ACTUALIZACIONES DE CHAT ==
+// =========================================================================
+
+/**
+ * Procesa los datos enviados por el Heartbeat y devuelve si hay nuevos mensajes.
+ *
+ * @param array $response La respuesta del Heartbeat a modificar.
+ * @param array $data     Los datos enviados desde el cliente.
+ * @param string $screen_id El ID de la pantalla actual.
+ * @return array La respuesta modificada.
+ */
+function crm_handle_heartbeat_request( $response, $data, $screen_id ) {
+    // Solo actuar si estamos en la página correcta
+    if ( strpos( $screen_id, 'crm-evolution-chat-history' ) === false ) {
+        return $response; // Salir si no es la página de chat
+    }
+    crm_log( "Heartbeat: Recibido pulso en pantalla '{$screen_id}'. Datos recibidos:", 'DEBUG', $data ); // Log inicial
+
+    $needs_list_refresh = false;
+    $new_messages_for_open_chat = [];
+
+    // --- 1. Comprobar si hay mensajes nuevos para el chat ABIERTO ---
+    if ( isset( $data['crm_current_open_chat_id'], $data['crm_last_message_timestamp'] ) ) {
+        $open_chat_user_id = absint( $data['crm_current_open_chat_id'] );
+        $last_message_timestamp = absint( $data['crm_last_message_timestamp'] );
+
+        if ( $open_chat_user_id > 0 ) {
+            // crm_log( "Heartbeat: Chat abierto User ID: {$open_chat_user_id}. Buscando mensajes desde: {$last_message_timestamp}", 'DEBUG' );
+            crm_log( "Heartbeat: Chat abierto User ID: {$open_chat_user_id}. Buscando mensajes con timestamp > {$last_message_timestamp}", 'DEBUG' );
+
+            $args_open_chat = array(
+                'post_type'      => 'crm_chat',
+                'posts_per_page' => 50, // Limitar por si llegan muchos de golpe
+                'orderby'        => 'meta_value_num',
+                'meta_key'       => '_crm_timestamp_wa',
+                'order'          => 'ASC', // Más antiguo primero para añadirlos en orden
+                'meta_query'     => array(
+                    'relation' => 'AND',
+                    array(
+                        'key'     => '_crm_contact_user_id',
+                        'value'   => $open_chat_user_id,
+                        'compare' => '=',
+                        'type'    => 'NUMERIC',
+                    ),
+                    array(
+                        'key'     => '_crm_timestamp_wa',
+                        'value'   => $last_message_timestamp,
+                        'compare' => '>', // Más reciente que el último mostrado
+                        'type'    => 'NUMERIC',
+                    ),
+                ),
+            );
+            $query_open_chat = new WP_Query( $args_open_chat );
+
+            if ( $query_open_chat->have_posts() ) {
+                crm_log( "Heartbeat: {$query_open_chat->post_count} mensajes nuevos encontrados para el chat abierto (User ID: {$open_chat_user_id}).", 'INFO' );
+                $needs_list_refresh = true; // Si hay mensajes nuevos en el chat abierto, la lista también necesita refrescarse
+                while ( $query_open_chat->have_posts() ) {
+                    $query_open_chat->the_post();
+                    $post_id = get_the_ID();
+                    $attachment_id = get_post_meta( $post_id, '_crm_media_attachment_id', true );
+                    // Formatear igual que en crm_get_conversation_messages_ajax
+                    $new_messages_for_open_chat[] = array(
+                        'id'            => $post_id,
+                        'text'          => get_the_content(),
+                        'timestamp'     => (int) get_post_meta( $post_id, '_crm_timestamp_wa', true ),
+                        'is_outgoing'   => (bool) get_post_meta( $post_id, '_crm_is_outgoing', true ),
+                        'type'          => get_post_meta( $post_id, '_crm_message_type', true ),
+                        'caption'       => get_post_meta( $post_id, '_crm_media_caption', true ),
+                        'attachment_id' => $attachment_id ? (int) $attachment_id : null,
+                        'attachment_url'=> $attachment_id ? wp_get_attachment_url( $attachment_id ) : null,
+                    );
+                }
+                wp_reset_postdata();
+                $response['crm_new_messages_for_open_chat'] = $new_messages_for_open_chat;
+            }
+        }
+    }
+
+    // --- 2. Comprobar si hay CUALQUIER mensaje nuevo desde el último chequeo GENERAL ---
+    //    (Hacer esto incluso si ya encontramos mensajes para el chat abierto, para asegurar que el flag general se ponga)
+    if ( isset( $data['crm_last_chat_check'] ) && !$needs_list_refresh ) { // Solo si no lo marcamos ya
+        $last_check_timestamp = absint( $data['crm_last_chat_check'] );
+        crm_log( "Heartbeat: Chequeo general. Buscando mensajes desde: {$last_check_timestamp}", 'DEBUG' );
+        $args_general = array(
+            'post_type'      => 'crm_chat',
+            'posts_per_page' => 1,
+            'orderby'        => 'meta_value_num',
+            'meta_key'       => '_crm_timestamp_wa',
+            'order'          => 'DESC',
+            'meta_query'     => array(
+                array(
+                    'key'     => '_crm_timestamp_wa',
+                    'value'   => $last_check_timestamp,
+                    'compare' => '>',
+                    'type'    => 'NUMERIC',
+                ),
+            ),
+            'fields' => 'ids', // Solo necesitamos los IDs
+        );
+        $query_general = new WP_Query( $args_general );
+
+        if ( $query_general->have_posts() ) {
+            crm_log( "Heartbeat: Detectados mensajes nuevos generales desde {$last_check_timestamp}.", 'INFO' );
+            $needs_list_refresh = true;
+        }
+    }
+
+    // --- 3. Añadir el flag de refresco general si es necesario ---
+    if ($needs_list_refresh) {
+        $response['crm_needs_list_refresh'] = true;
+    }
+
+    return $response;
+}
+add_filter( 'heartbeat_received', 'crm_handle_heartbeat_request', 10, 3 );
+add_filter( 'heartbeat_nopriv_received', 'crm_handle_heartbeat_request', 10, 3 ); // Opcional: si quieres que funcione para usuarios no logueados (improbable en admin)

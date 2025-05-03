@@ -1120,6 +1120,7 @@
             loadRecentConversations();
         }
         // --- FIN: Lógica para Historial de Chats ---
+        if ($('#crm-chat-container').length) initChatHeartbeat(); // <--- ¡Aquí está!
 
 
         crm_js_log('Script del plugin CRM Evolution Sender inicializado completamente.');
@@ -1162,12 +1163,12 @@
                                 <img src="${convo.avatar_url}" alt="${escapeHtml(convo.display_name)}" class="chat-avatar">
                                 <div class="chat-item-details">
                                     <div class="chat-item-header">
+                                        <span class="chat-item-instance">[${escapeHtml(convo.instance_name)}]</span> <!-- Movido aquí -->
                                         <span class="chat-item-name">${escapeHtml(convo.display_name)}</span>
                                         <span class="chat-item-time">${timeString}</span>
                                     </div>
                                     <div class="chat-item-snippet">
                                         ${escapeHtml(convo.last_message_snippet)}
-                                        <span class="chat-item-instance">(${escapeHtml(convo.instance_name)})</span>
                                     </div>
                                 </div>
                             </div>
@@ -1208,17 +1209,22 @@
             $(this).addClass('active');
 
             // Cargar mensajes
+
+            currentOpenChatUserId = userId; // <-- Guardar ID del chat abierto
+            lastDisplayedMessageTimestamp = 0; // <-- Resetear timestamp al abrir nuevo chat
+ 
             loadConversationMessages(userId);
+            $('#chat-input-area').show();
         });
     }
-
     /**
      * Carga los mensajes para una conversación específica vía AJAX.
      * @param {number} userId El ID del usuario WP cuya conversación cargar.
      */
     function loadConversationMessages(userId) {
+        // currentOpenChatUserId = userId; // <-- Ya se asigna en el click handler
         const $ = jQuery;
-        const messagesContainer = $('#chat-messages-column');
+        const messagesContainer = $('#chat-messages-area'); // <-- CORREGIDO ID
         messagesContainer.html('<p><span class="spinner is-active" style="float: none; vertical-align: middle;"></span> Cargando mensajes...</p>'); // Mostrar spinner
 
         crm_js_log(`Solicitando mensajes para User ID: ${userId}`);
@@ -1235,6 +1241,7 @@
                 crm_js_log(`Respuesta recibida para mensajes de User ID ${userId}:`, 'DEBUG', response);
                 messagesContainer.empty(); // Limpiar contenedor
 
+                let latestTimestampInBatch = 0; // Para guardar el timestamp del último mensaje de este lote
                 if (response.success && Array.isArray(response.data) && response.data.length > 0) {
                     response.data.forEach(function(msg) {
                         const messageDate = new Date(msg.timestamp * 1000);
@@ -1254,14 +1261,14 @@
                                 ${msg.caption ? `<div class="message-caption">${escapeHtml(msg.caption)}</div>` : ''}
                             `;
                         } else if (msg.type === 'video' && msg.attachment_url) {
-                             messageContentHtml = `
+                            messageContentHtml = `
                                 <div class="message-media">
                                     <video controls preload="metadata" src="${escapeHtml(msg.attachment_url)}"></video>
                                 </div>
                                 ${msg.caption ? `<div class="message-caption">${escapeHtml(msg.caption)}</div>` : ''}
                             `;
                         } else if (msg.type === 'document' && msg.attachment_url) {
-                             messageContentHtml = `
+                            messageContentHtml = `
                                 <div class="message-document">
                                     <a href="${escapeHtml(msg.attachment_url)}" target="_blank" download>
                                         <span class="dashicons dashicons-media-default"></span> ${escapeHtml(msg.caption || msg.attachment_url.split('/').pop())}
@@ -1280,9 +1287,15 @@
                             </div>
                         `;
                         messagesContainer.append(messageHtml);
+
+                        // Actualizar el timestamp más reciente de este lote
+                        if (msg.timestamp > latestTimestampInBatch) {
+                            latestTimestampInBatch = msg.timestamp;
+                        }
                     });
 
                     // Hacer scroll hasta el último mensaje
+                    lastDisplayedMessageTimestamp = latestTimestampInBatch; // <-- Guardar timestamp del último mensaje mostrado
                     messagesContainer.scrollTop(messagesContainer[0].scrollHeight);
 
                 } else if (response.success && response.data.length === 0) {
@@ -1299,6 +1312,119 @@
         });
     }
 
+    /**
+     * Renderiza un único mensaje en el contenedor especificado.
+     * @param {object} msg Objeto del mensaje (como el devuelto por AJAX).
+     * @param {jQuery} container El contenedor jQuery donde añadir el mensaje.
+     * @returns {number} El timestamp del mensaje renderizado.
+     */
+    function renderSingleMessage(msg, container) {
+        const $ = jQuery;
+        const messageDate = new Date(msg.timestamp * 1000);
+        const timeString = messageDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        const messageClass = msg.is_outgoing ? 'chat-message outgoing' : 'chat-message incoming';
 
+        let messageContentHtml = '';
+        // Reutilizar la lógica de renderizado de tipos de mensaje
+        if (msg.type === 'image' && msg.attachment_url) {
+            messageContentHtml = `<div class="message-media"><a href="${escapeHtml(msg.attachment_url)}" target="_blank" title="Ver imagen completa"><img src="${escapeHtml(msg.attachment_url)}" alt="Imagen adjunta" loading="lazy"></a></div>${msg.caption ? `<div class="message-caption">${escapeHtml(msg.caption)}</div>` : ''}`;
+        } else if (msg.type === 'video' && msg.attachment_url) {
+            messageContentHtml = `<div class="message-media"><video controls preload="metadata" src="${escapeHtml(msg.attachment_url)}"></video></div>${msg.caption ? `<div class="message-caption">${escapeHtml(msg.caption)}</div>` : ''}`;
+        } else if (msg.type === 'document' && msg.attachment_url) {
+            messageContentHtml = `<div class="message-document"><a href="${escapeHtml(msg.attachment_url)}" target="_blank" download><span class="dashicons dashicons-media-default"></span> ${escapeHtml(msg.caption || msg.attachment_url.split('/').pop())}</a></div>`;
+        } else {
+            messageContentHtml = `<div class="message-text">${escapeHtml(msg.text || msg.caption || '')}</div>`;
+        }
+
+        const messageHtml = `
+            <div class="${messageClass}" data-msg-id="${msg.id}">
+                <div class="message-bubble">
+                    ${messageContentHtml}
+                    <div class="message-time">${timeString}</div>
+                </div>
+            </div>`;
+
+        container.append(messageHtml);
+        return msg.timestamp;
+    }
+
+
+    // =========================================================================
+    // == API HEARTBEAT PARA ACTUALIZACIONES DE CHAT ==
+    // =========================================================================
+
+    let currentOpenChatUserId = null; // ID del usuario cuya conversación está abierta
+    let lastDisplayedMessageTimestamp = 0; // Timestamp del último mensaje mostrado en el chat abierto
+
+    let lastChatCheckTimestamp = Math.floor(Date.now() / 1000); // Timestamp inicial al cargar la página
+
+    /**
+     * Inicializa los listeners de la API Heartbeat para el chat.
+     */
+    function initChatHeartbeat() {
+        const $ = jQuery;
+        crm_js_log('Inicializando Heartbeat para actualizaciones de chat...');
+
+        $(document).on('heartbeat-send.crmChat', function(event, data) {
+            // Añadir nuestro timestamp al pulso saliente
+            data['crm_last_chat_check'] = lastChatCheckTimestamp; // Para refrescar lista general
+            if (currentOpenChatUserId) {
+                data['crm_current_open_chat_id'] = currentOpenChatUserId;
+                data['crm_last_message_timestamp'] = lastDisplayedMessageTimestamp; // Timestamp del último mensaje VISIBLE
+            }
+            crm_js_log('Heartbeat Send:', 'DEBUG', {
+                lastCheck: lastChatCheckTimestamp,
+                openChat: currentOpenChatUserId,
+                lastMsgTs: lastDisplayedMessageTimestamp
+            });
+        });
+
+        $(document).on('heartbeat-tick.crmChat', function(event, data) {
+            crm_js_log('Heartbeat Tick: Respuesta recibida', 'DEBUG', data);
+
+            let listNeedsRefresh = false;
+            let openChatUpdated = false;
+
+            // 1. Comprobar si hay mensajes nuevos para el chat ABIERTO
+            if (data.hasOwnProperty('crm_new_messages_for_open_chat') && Array.isArray(data.crm_new_messages_for_open_chat) && data.crm_new_messages_for_open_chat.length > 0) {
+                crm_js_log('Heartbeat Tick: Nuevos mensajes recibidos para el chat abierto.', 'INFO');
+                const messagesContainer = $('#chat-messages-area'); // <-- CORREGIDO ID
+                let latestTimestampInBatch = lastDisplayedMessageTimestamp;
+
+                data.crm_new_messages_for_open_chat.forEach(function(msg) {
+                    // Evitar duplicados (si el heartbeat fuera muy rápido)
+                    if (messagesContainer.find(`[data-msg-id="${msg.id}"]`).length === 0) {
+                        const renderedTimestamp = renderSingleMessage(msg, messagesContainer); // Usar función reutilizable
+                        if (renderedTimestamp > latestTimestampInBatch) {
+                            latestTimestampInBatch = renderedTimestamp;
+                        }
+                    }
+                });
+                lastDisplayedMessageTimestamp = latestTimestampInBatch; // Actualizar el timestamp del último mensaje
+                messagesContainer.scrollTop(messagesContainer[0].scrollHeight); // Scroll al final
+                openChatUpdated = true;
+            }
+
+            // 2. Comprobar si la lista general necesita refrescarse
+            if (data.hasOwnProperty('crm_needs_list_refresh') && data.crm_needs_list_refresh === true) {
+                listNeedsRefresh = true;
+            }
+
+            // 3. Actualizar timestamp de chequeo general y refrescar lista si es necesario
+            if (listNeedsRefresh) {
+                crm_js_log('Heartbeat Tick: Se necesita refrescar la lista de conversaciones.');
+                lastChatCheckTimestamp = Math.floor(Date.now() / 1000);
+                // Solo recargar la lista si el chat abierto NO fue actualizado (para evitar recarga innecesaria)
+                // O si *siempre* quieres que la lista se reordene. Por ahora, evitamos recarga si ya actualizamos el chat abierto.
+                if (!openChatUpdated) {
+                    loadRecentConversations();
+                } else {
+                    // Opcional: Podríamos solo actualizar el snippet/hora del chat activo en la lista izquierda
+                    // sin recargar toda la lista. Por ahora, no hacemos nada extra aquí.
+                    crm_js_log('Heartbeat Tick: Lista no refrescada porque el chat abierto ya fue actualizado.', 'DEBUG');
+                }
+            }
+        });
+    }
 
 })(jQuery); // Fin de la encapsulación
