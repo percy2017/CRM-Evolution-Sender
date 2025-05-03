@@ -124,7 +124,7 @@ function crm_get_instances_callback() {
 
     } elseif ( is_array( $api_response ) ) {
 
-        crm_log( 'Instancias obtenidas correctamente de la API.', 'INFO' );
+        // crm_log( 'Instancias obtenidas correctamente de la API.', 'INFO' );
 
         // Mapear los datos si es necesario para que coincidan con lo que espera DataTables
         $instances_data = array();
@@ -156,50 +156,74 @@ add_action( 'wp_ajax_crm_get_instances', 'crm_get_instances_callback' );
 
 /**
  * AJAX Handler para crear una nueva instancia.
+ * Recibe datos del formulario Thickbox, incluyendo opciones adicionales y configuración de webhook.
  */
 function crm_create_instance_callback() {
     crm_log( 'Recibida petición AJAX: crm_create_instance' );
-    check_ajax_referer( 'crm_evolution_sender_nonce', '_ajax_nonce' );
+
+    // 1. Verificar Nonce específico del formulario y Permisos
+    check_ajax_referer( 'crm_create_instance_action', 'crm_create_instance_nonce' ); // Correcto nonce del form
     if ( ! current_user_can( 'manage_options' ) ) {
         wp_send_json_error( array( 'message' => 'Permiso denegado.' ), 403 );
     }
 
-    // Sanitizar datos de entrada
+    // 2. Sanitizar datos de entrada (incluyendo los nuevos campos)
     $instance_name = isset( $_POST['instance_name'] ) ? sanitize_key( $_POST['instance_name'] ) : '';
-    $api_key = isset( $_POST['api_key'] ) ? sanitize_text_field( $_POST['api_key'] ) : '';
-    // Aquí podrías añadir más parámetros si la API los necesita (webhook, etc.)
+    $webhook_url   = isset( $_POST['webhook_url'] ) ? esc_url_raw( wp_unslash( $_POST['webhook_url'] ) ) : ''; // Sanitizar URL
 
+
+    // 3. Validar datos obligatorios
     if ( empty( $instance_name ) ) {
         wp_send_json_error( array( 'message' => 'El nombre de la instancia es obligatorio.' ) );
     }
+    // Validar formato de nombre (opcional, pero bueno)
+    if (!preg_match('/^[a-zA-Z0-9_-]+$/', $instance_name)) {
+        wp_send_json_error( array( 'message' => 'Nombre de instancia inválido. Solo letras, números, guiones y guiones bajos.' ) );
+    }
 
-    // Preparar datos para la API (según v1.8, endpoint /instance/create)
+
+    // 4. Preparar datos para la API Evolution (/instance/create)
     $body = array(
         'instanceName' => $instance_name,
-        // 'token'        => !empty($api_key) ? $api_key : null, // API Key específica si se proporcionó
-        'qrcode'       => true, // Pedir QR code inmediatamente
-        // Añadir otros parámetros necesarios: webhook, events, etc.
-        // 'webhook' => 'https://tu-webhook.com/events',
-        // 'events' => ['messages.upsert', 'connection.update', 'qrcode.updated'],
+        'qrcode'       => true,
+        'sync_full_history' => true,
+        'groups_ignore' => true,
+        'always_online' => true,
+        'webhook' => $webhook_url,
+        'webhook_base64' => true,
+        'events' => [
+            'MESSAGES_UPSERT',
+        ]
     );
-
-    crm_log("Preparando cuerpo para API Evolution /instance/create:", 'DEBUG', $body); // LOG IMPORTANTE
-
-
-    // Llamar a la API para crear
+ 
+    // 5. Llamar a la API para crear
     $api_response = crm_evolution_api_request( 'POST', '/instance/create', $body );
 
+    // 6. Procesar respuesta
     if ( is_wp_error( $api_response ) ) {
-        wp_send_json_error( array( 'message' => 'Error API: ' . $api_response->get_error_message() ) );
+        // Comprobar si el error es específicamente 400 Bad Request
+        $error_data = $api_response->get_error_data();
+        $status_code = isset($error_data['status']) ? $error_data['status'] : null;
+        $error_message = 'Error API: ' . $api_response->get_error_message();
+        wp_send_json_error( array( 'message' => $error_message ), $status_code ?: 500 ); // Devolver código de error si está disponible
     } else {
-        // Éxito - La API puede devolver detalles de la instancia creada y/o el hash/QR
+        // Éxito
         $message = isset($api_response['message']) ? $api_response['message'] : 'Instancia creada iniciada.';
-        $status = isset($api_response['instance']['status']) ? $api_response['instance']['status'] : null; // Para saber si devuelve 'qrcode'
+        // Intentar obtener el estado de la respuesta, puede variar la estructura
+        $status = null;
+        if (isset($api_response['instance']) && isset($api_response['instance']['status'])) {
+            $status = $api_response['instance']['status'];
+        } elseif (isset($api_response['status'])) { // A veces la API lo devuelve en el nivel raíz
+             $status = $api_response['status'];
+        }
+
         crm_log( "Instancia {$instance_name} creada. Respuesta API:", 'INFO', $api_response );
-        wp_send_json_success( array( 'message' => $message, 'status' => $status ) ); // Devolver estado para posible acción QR en JS
+        wp_send_json_success( array( 'message' => $message, 'status' => $status ) );
     }
 }
-add_action( 'wp_ajax_crm_create_instance', 'crm_create_instance_callback' );
+
+// La acción add_action ya está registrada, no necesita cambios.
+add_action( 'wp_ajax_crm_create_instance', 'crm_create_instance_callback' ); // La acción ya está registrada
 
 
 /**
@@ -242,7 +266,7 @@ add_action( 'wp_ajax_crm_delete_instance', 'crm_delete_instance_callback' );
  * AJAX Handler para obtener el QR Code de una instancia.
  */
 function crm_get_instance_qr_callback() {
-    crm_log( 'Recibida petición AJAX: crm_get_instance_qr' );
+    // crm_log( 'Recibida petición AJAX: crm_get_instance_qr' );
     check_ajax_referer( 'crm_evolution_sender_nonce', '_ajax_nonce' );
     if ( ! current_user_can( 'manage_options' ) ) {
         wp_send_json_error( array( 'message' => 'Permiso denegado.' ), 403 );
@@ -271,14 +295,14 @@ function crm_get_instance_qr_callback() {
 
 
         if ($qr_code_base64) {
-             crm_log( "QR Code obtenido para {$instance_name}.", 'INFO' );
+            //  crm_log( "QR Code obtenido para {$instance_name}.", 'INFO' );
              // Asegurarse de que el base64 tenga el prefijo correcto para imagen
              if (strpos($qr_code_base64, 'data:image') === false) {
                  $qr_code_base64 = 'data:image/png;base64,' . $qr_code_base64;
              }
             wp_send_json_success( array( 'qrCode' => $qr_code_base64 ) );
         } else {
-             crm_log( "No se encontró QR Code en la respuesta para {$instance_name}. Estado puede ser otro.", 'WARN', $api_response );
+            //  crm_log( "No se encontró QR Code en la respuesta para {$instance_name}. Estado puede ser otro.", 'WARN', $api_response );
              $status = isset($api_response['instance']['status']) ? $api_response['instance']['status'] : 'desconocido';
              $message = "No se necesita QR Code. Estado actual: {$status}.";
              if ($status === 'connection') $message = "La instancia ya está conectada.";
@@ -293,7 +317,7 @@ add_action( 'wp_ajax_crm_get_instance_qr', 'crm_get_instance_qr_callback' );
  * AJAX Handler para conectar una instancia (si ya existe y está desconectada).
  */
 function crm_connect_instance_callback() {
-    crm_log( 'Recibida petición AJAX: crm_connect_instance' );
+    // crm_log( 'Recibida petición AJAX: crm_connect_instance' );
     check_ajax_referer( 'crm_evolution_sender_nonce', '_ajax_nonce' );
     if ( ! current_user_can( 'manage_options' ) ) {
         wp_send_json_error( array( 'message' => 'Permiso denegado.' ), 403 );
@@ -316,7 +340,7 @@ function crm_connect_instance_callback() {
         if ($status === 'qrcode') $message .= " Se requiere escanear QR.";
         if ($status === 'connection') $message = "La instancia {$instance_name} ya está conectada.";
 
-        crm_log( $message, 'INFO', $api_response );
+        // crm_log( $message, 'INFO', $api_response );
         wp_send_json_success( array( 'message' => $message, 'status' => $status ) );
     }
 }
@@ -327,7 +351,7 @@ add_action( 'wp_ajax_crm_connect_instance', 'crm_connect_instance_callback' );
  * AJAX Handler para desconectar una instancia.
  */
 function crm_disconnect_instance_callback() {
-    crm_log( 'Recibida petición AJAX: crm_disconnect_instance' );
+    // crm_log( 'Recibida petición AJAX: crm_disconnect_instance' );
     check_ajax_referer( 'crm_evolution_sender_nonce', '_ajax_nonce' );
     if ( ! current_user_can( 'manage_options' ) ) {
         wp_send_json_error( array( 'message' => 'Permiso denegado.' ), 403 );
@@ -344,10 +368,10 @@ function crm_disconnect_instance_callback() {
 
      if ( is_wp_error( $api_response ) ) {
          // Podría dar error si ya está desconectada, tratar como éxito?
-         crm_log( "Error API al desconectar {$instance_name}: " . $api_response->get_error_message(), 'ERROR' );
+        //  crm_log( "Error API al desconectar {$instance_name}: " . $api_response->get_error_message(), 'ERROR' );
         wp_send_json_error( array( 'message' => 'Error API: ' . $api_response->get_error_message() ) );
     } else {
-        crm_log( "Instancia {$instance_name} desconectada.", 'INFO', $api_response );
+        // crm_log( "Instancia {$instance_name} desconectada.", 'INFO', $api_response );
         wp_send_json_success( array( 'message' => "Instancia {$instance_name} desconectada." ) );
     }
 }
@@ -357,7 +381,7 @@ add_action( 'wp_ajax_crm_disconnect_instance', 'crm_disconnect_instance_callback
  * AJAX Handler para obtener instancias activas (conectadas o esperando QR) para selects.
  */
 function crm_get_active_instances_callback() {
-    crm_log( 'Recibida petición AJAX: crm_get_active_instances' );
+    // crm_log( 'Recibida petición AJAX: crm_get_active_instances' );
    check_ajax_referer( 'crm_evolution_sender_nonce', '_ajax_nonce' );
    if ( ! current_user_can( 'manage_options' ) ) {
        wp_send_json_error( array( 'message' => 'Permiso denegado.' ), 403 );
@@ -379,7 +403,7 @@ function crm_get_active_instances_callback() {
                );
            }
        }
-        crm_log( 'Instancias activas obtenidas: ' . count($active_instances), 'INFO' );
+        // crm_log( 'Instancias activas obtenidas: ' . count($active_instances), 'INFO' );
        wp_send_json_success( $active_instances );
    } else {
        wp_send_json_error( array( 'message' => 'Respuesta inesperada de la API.' ) );
@@ -395,7 +419,7 @@ add_action( 'wp_ajax_crm_get_active_instances', 'crm_get_active_instances_callba
  * AJAX Handler para obtener la lista de usuarios de WordPress.
  */
 function crm_get_wp_users_callback() {
-    crm_log( 'Recibida petición AJAX: crm_get_wp_users' );
+    // crm_log( 'Recibida petición AJAX: crm_get_wp_users' );
     check_ajax_referer( 'crm_evolution_sender_nonce', '_ajax_nonce' );
     if ( ! current_user_can( 'manage_options' ) ) { // O una capacidad más específica si la creas
         wp_send_json_error( array( 'message' => 'Permiso denegado.' ), 403 );
@@ -434,19 +458,19 @@ function crm_get_wp_users_callback() {
         );
     }
 
-    crm_log( 'Usuarios WP obtenidos para AJAX: ' . count($users_data) . ' encontrados.', 'INFO' );
+    // crm_log( 'Usuarios WP obtenidos para AJAX: ' . count($users_data) . ' encontrados.', 'INFO' );
     wp_send_json_success( $users_data );
 }
 add_action( 'wp_ajax_crm_get_wp_users', 'crm_get_wp_users_callback' );
 
 function crm_add_wp_user_callback() {
-    crm_log( 'Recibida petición AJAX: crm_add_wp_user' );
+    // crm_log( 'Recibida petición AJAX: crm_add_wp_user' );
 
     // 1. Verificar Nonce y Permisos (¡MUY IMPORTANTE!)
     // Usa el nonce general 'crm_evolution_sender_nonce' que se pasa en crm_evolution_sender_params
     check_ajax_referer('crm_evolution_sender_nonce', '_ajax_nonce');
     if (!current_user_can('create_users')) { // O 'manage_options' o el capability adecuado
-        crm_log( 'Error AJAX: Permiso denegado para crm_add_wp_user.', 'ERROR' );
+        // crm_log( 'Error AJAX: Permiso denegado para crm_add_wp_user.', 'ERROR' );
         wp_send_json_error(['message' => 'No tienes permisos para realizar esta acción.'], 403);
         return;
     }
@@ -462,23 +486,23 @@ function crm_add_wp_user_callback() {
     // Recibe el campo 'user_phone_full' enviado desde app.js
     // Sanitiza eliminando cualquier cosa que no sea dígito o el signo '+' inicial
     $full_phone = isset($_POST['user_phone_full']) ? sanitize_text_field( preg_replace('/[^+0-9]/', '', $_POST['user_phone_full']) ) : '';
-    crm_log( 'Teléfono internacional recibido y sanitizado: ' . $full_phone, 'DEBUG' );
+    // crm_log( 'Teléfono internacional recibido y sanitizado: ' . $full_phone, 'DEBUG' );
     // *** FIN: Recoger y sanitizar el número de teléfono internacional ***
 
     // 3. Validar Datos (Ejemplos)
     if (empty($email) || !is_email($email)) {
-        crm_log( 'Error validación: Correo inválido o vacío.', 'WARN' );
+        // crm_log( 'Error validación: Correo inválido o vacío.', 'WARN' );
         wp_send_json_error(['message' => 'Correo electrónico inválido o vacío.']);
         return; // Salir si hay error
     }
     if (username_exists($email) || email_exists($email)) {
-         crm_log( 'Error validación: Correo ya existe.', 'WARN' );
+        //  crm_log( 'Error validación: Correo ya existe.', 'WARN' );
         wp_send_json_error(['message' => 'El correo electrónico ya está registrado.']);
         return;
     }
     // *** INICIO: Validar que el teléfono no esté vacío (ya que es requerido en el frontend) ***
     if (empty($full_phone)) {
-        crm_log( 'Error validación: Teléfono vacío.', 'WARN' );
+        // crm_log( 'Error validación: Teléfono vacío.', 'WARN' );
         wp_send_json_error(['message' => 'El número de teléfono es obligatorio.']);
         return;
     }

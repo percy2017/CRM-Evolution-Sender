@@ -76,7 +76,10 @@ function crm_evolution_sender_main_page_html() {
 function crm_evolution_sender_render_instancias_tab() {
     ?>
     <div id="tab-instancias">
-        <button type="button" id="btn-open-add-instance-modal" class="button button-primary">Añadir Nueva Instancia</button>
+        <a href="#TB_inline?width=300&height=350&inlineId=add-instance-modal-content" id="btn-add-instance" class="button button-primary thickbox" title="<?php esc_attr_e('Añadir Nueva Instancia Evolution API', CRM_EVOLUTION_SENDER_TEXT_DOMAIN); ?>">
+            <?php esc_html_e( 'Añadir Nueva Instancia', CRM_EVOLUTION_SENDER_TEXT_DOMAIN ); ?>
+        </a>
+        
         <table id="instances-table" class="display wp-list-table widefat fixed striped table-view-list" style="width:100%">
             <thead>
                 <tr>
@@ -93,6 +96,28 @@ function crm_evolution_sender_render_instancias_tab() {
                 </tr>
             </tbody>
         </table>
+            <!-- === INICIO: Contenido del Modal para Añadir Instancia (para Thickbox) === -->
+            <div id="add-instance-modal-content" style="display:none;">
+                <form id="add-instance-form" class="crm-modal-form">
+                    <?php wp_nonce_field( 'crm_create_instance_action', 'crm_create_instance_nonce' ); ?>
+        
+                    <p>
+                        <label for="instance_name"><?php esc_html_e( 'Nombre de la Instancia (obligatorio)', CRM_EVOLUTION_SENDER_TEXT_DOMAIN ); ?></label>
+                        <input type="text" name="instance_name" id="instance_name" class="regular-text" required title="<?php esc_attr_e('Solo letras, números, guiones bajos y guiones medios.', CRM_EVOLUTION_SENDER_TEXT_DOMAIN); ?>">
+                        <p class="description"><?php esc_html_e( 'Identificador único para la instancia. Sin espacios ni caracteres especiales.', CRM_EVOLUTION_SENDER_TEXT_DOMAIN ); ?></p>
+                    </p>
+                    <p>
+                        <label for="webhook_url"><?php esc_html_e( 'Webhook URL (obligatorio)', CRM_EVOLUTION_SENDER_TEXT_DOMAIN ); ?></label>
+                        <input type="url" name="webhook_url" id="webhook_url" class="regular-text" value="<?php echo esc_url( rest_url( 'crm-evolution-api/v1/webhook' ) ); ?>" required>
+                        <p class="description"><?php esc_html_e( 'URL generada automáticamente para recibir eventos en este plugin. No editable.', CRM_EVOLUTION_SENDER_TEXT_DOMAIN ); ?>
+                    </p>
+               
+        
+                    <?php submit_button( __( 'Crear Instancia', CRM_EVOLUTION_SENDER_TEXT_DOMAIN ), 'primary', 'submit-add-instance' ); ?>
+                </form>
+            </div>
+            <!-- === FIN: Contenido del Modal para Añadir Instancia === -->
+        
     </div>
     <?php
 }

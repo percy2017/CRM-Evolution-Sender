@@ -28,6 +28,10 @@ require_once CRM_EVOLUTION_SENDER_PLUGIN_DIR . 'crm-main.php';
 require_once CRM_EVOLUTION_SENDER_PLUGIN_DIR . 'crm-setting.php';
 // require_once CRM_EVOLUTION_SENDER_PLUGIN_DIR . 'crm-cron.php'; // Descomentar cuando se implemente
 require_once CRM_EVOLUTION_SENDER_PLUGIN_DIR . 'crm-ajax-handlers.php';
+require_once CRM_EVOLUTION_SENDER_PLUGIN_DIR . 'crm-rest-api.php';
+require_once CRM_EVOLUTION_SENDER_PLUGIN_DIR . 'crm-cpt-chat.php';
+
+
 
 
 // --- Logging Básico (PHP) ---
@@ -74,6 +78,16 @@ function crm_evolution_sender_admin_menu() {
         'crm-evolution-sender-settings', // Slug de este submenú
         'crm_evolution_sender_settings_page_html' // Función que muestra el contenido
     );
+    // Añadir submenú para listar los Chats CRM (CPT)
+    add_submenu_page(
+        'crm-evolution-sender-main',                     // Slug del menú padre
+        __( 'Historial de Chats', CRM_EVOLUTION_SENDER_TEXT_DOMAIN ), // Título de la página
+        __( 'Chats CRM', CRM_EVOLUTION_SENDER_TEXT_DOMAIN ),          // Título del submenú
+        'edit_posts',                                    // Capacidad requerida para ver posts
+        'edit.php?post_type=crm_chat',                   // Slug: URL directa a la lista del CPT
+        null                                             // No necesita función de callback, WP maneja edit.php
+    );
+    
 }
 add_action( 'admin_menu', 'crm_evolution_sender_admin_menu' );
 
@@ -169,7 +183,12 @@ function crm_evolution_sender_enqueue_assets( $hook ) {
     wp_localize_script( 'crm-evolution-sender-appjs', 'crm_evolution_sender_params', array(
         'ajax_url' => admin_url( 'admin-ajax.php' ),
         'nonce'    => wp_create_nonce( 'crm_evolution_sender_nonce' ), // Nonce para seguridad AJAX
-        'utils_script_path' => CRM_EVOLUTION_SENDER_PLUGIN_URL . 'assets/vendor/intl-tel-input/js/utils.js' // Verifica esta ruta
+        'utils_script_path' => CRM_EVOLUTION_SENDER_PLUGIN_URL . 'assets/vendor/intl-tel-input/js/utils.js',
+        'i18n' => array(
+            'creatingText' => esc_js( __( 'Creando...', CRM_EVOLUTION_SENDER_TEXT_DOMAIN ) ),
+            // Puedes añadir más cadenas aquí si las necesitas en JS
+            // 'savingText'   => esc_js( __( 'Guardando...', CRM_EVOLUTION_SENDER_TEXT_DOMAIN ) ),
+        )
     ));
 }
 add_action( 'admin_enqueue_scripts', 'crm_evolution_sender_enqueue_assets' );
@@ -190,7 +209,7 @@ function crm_evolution_sender_add_settings_link( $links ) {
 $plugin_basename = plugin_basename( __FILE__ );
 add_filter( "plugin_action_links_$plugin_basename", 'crm_evolution_sender_add_settings_link' );
 
-// --- Funciones de Activacion / Desactivacion ---
+
 function crm_evolution_sender_activate() {
     if ( false === get_option( 'crm_evolution_api_url' ) ) {
         add_option( 'crm_evolution_api_url', 'https://api.percyalvarez.com' );
@@ -207,4 +226,66 @@ function crm_evolution_sender_deactivate() {
 }
 register_deactivation_hook( __FILE__, 'crm_evolution_sender_deactivate' );
 
-// --- Fin de crm-evolution-sender.php ---
+
+
+
+/**
+ * Filtra los datos del avatar para usar la imagen guardada en Media Library si existe.
+ *
+ * @param array $args Argumentos para get_avatar().
+ * @param mixed $id_or_email El ID de usuario, email, objeto WP_User o WP_Comment.
+ * @return array Argumentos modificados.
+ */
+function crm_evolution_use_media_library_avatar( $args, $id_or_email ) {
+    $user_id = null;
+
+    // Determinar el ID del usuario
+    if ( is_numeric( $id_or_email ) ) {
+        $user_id = (int) $id_or_email;
+    } elseif ( is_object( $id_or_email ) && isset( $id_or_email->user_id ) ) {
+        $user_id = (int) $id_or_email->user_id; // Para comentarios
+    } elseif ( is_object( $id_or_email ) && isset( $id_or_email->ID ) ) {
+         $user_id = (int) $id_or_email->ID; // Para WP_User
+    } elseif ( is_string( $id_or_email ) && is_email( $id_or_email ) ) {
+        $user = get_user_by( 'email', $id_or_email );
+        if ( $user ) {
+            $user_id = $user->ID;
+        }
+    }
+
+    // Si no pudimos obtener un ID de usuario, no hacemos nada
+    if ( ! $user_id ) {
+        return $args;
+    }
+
+    // Obtener el ID del adjunto guardado en el metadato
+    $attachment_id = get_user_meta( $user_id, '_crm_avatar_attachment_id', true );
+
+    // Si encontramos un ID de adjunto válido
+    if ( $attachment_id ) {
+        // Obtener la URL de la imagen del tamaño solicitado (o un tamaño razonable)
+        $size = isset( $args['size'] ) ? $args['size'] : 96; // Usar tamaño de args o 96 por defecto
+        $image_data = wp_get_attachment_image_src( $attachment_id, array( $size, $size ) ); // Pedir tamaño cuadrado
+
+        // Si obtuvimos la URL de la imagen
+        if ( $image_data && isset( $image_data[0] ) ) {
+            $args['url'] = $image_data[0]; // Reemplazar la URL por la de nuestra imagen
+            $args['found_avatar'] = true; // Indicar que encontramos un avatar personalizado
+            // Opcional: añadir una clase CSS
+            $args['class'] = array_merge( (array) $args['class'], array('crm-local-avatar') );
+            crm_log("Usando avatar local (Attachment ID: {$attachment_id}) para usuario ID {$user_id}.", 'DEBUG');
+        } else {
+             crm_log("Se encontró Attachment ID {$attachment_id} para usuario {$user_id}, pero wp_get_attachment_image_src falló.", 'WARN');
+        }
+    }
+
+    return $args; // Devolver los argumentos (modificados o no)
+}
+add_filter( 'get_avatar_data', 'crm_evolution_use_media_library_avatar', 10, 2 );
+
+
+
+
+
+
+?>

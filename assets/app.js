@@ -52,7 +52,7 @@
     let instancesTable = null; // Referencia a la DataTable de Instancias
     let usersTable = null;     // Referencia a la DataTable de Usuarios
     let campaignsTable = null; // Referencia a la DataTable de Campañas
-    let phoneInputInstance = null; //instancia de intl-tel-input
+    let phoneInputInstance = null; //instancia de intl-tel-inpu
 
     /**
     * Inicializa la DataTable para la tabla de Instancias API.
@@ -281,84 +281,84 @@
     }
 
 
-       function initCampaignsTable() {
-           crm_js_log('Inicializando DataTable para Campañas.');
-            if ($('#campaigns-table').length === 0) {
-               crm_js_log('Tabla #campaigns-table no encontrada en el DOM.', 'WARN');
-               return;
-           }
-           if (campaignsTable) {
-                crm_js_log('DataTable de Campañas ya inicializada. Refrescando datos...');
-               campaignsTable.ajax.reload();
-               return;
-           }
-   
-           campaignsTable = $('#campaigns-table').DataTable({
-               processing: true,
-               serverSide: false, // Cambiar si es necesario
-                ajax: {
-                   url: crm_evolution_sender_params.ajax_url,
-                   type: 'POST',
-                   data: {
-                       action: 'crm_get_campaigns',
-                       _ajax_nonce: crm_evolution_sender_params.nonce
-                   },
-                    dataSrc: function(json) {
-                       console.log(json) 
-                       if (!json || !json.success || !Array.isArray(json.data)) {
-                           crm_js_log('Error o formato inesperado en la respuesta AJAX para get_campaigns.', 'ERROR', json);
-                           showNotification('Error al cargar campañas.', 'error');
-                           return [];
-                       }
-                        crm_js_log('Datos de campañas recibidos:', json.data);
-                       return json.data;
-                   },
-                   error: function(xhr, status, error) {
-                       crm_js_log('Error AJAX al obtener campañas.', 'ERROR', { status: status, error: error, response: xhr.responseText });
-                       showNotification('Error de conexión al cargar campañas.', 'error');
-                   }
-               },
-               columns: [
-                   { data: 'name' }, // <--- CORREGIDO (coincide con get_the_title() en PHP)
-                   { data: 'instance_name' }, // OK (asumiendo meta key _crm_instance_name)
-                   { data: 'message', render: function(data, type, row){ return data ? escapeHtml(data).substring(0, 50) + '...' : ''; } }, // OK (asumiendo meta key _crm_message_content) - Añadido chequeo por si está vacío
-                   { data: 'media_url', render: function(data, type, row){ return data ? `<a href="${escapeHtml(data)}" target="_blank">Ver Media</a>` : 'No'; } }, // OK (asumiendo meta key _crm_media_url)
-                   { data: 'target_tag', defaultContent: '<i>N/A</i>' }, // OK (asumiendo meta key _crm_target_tag) - Cambiado defaultContent
-                   // { data: 'recipients_count', defaultContent: '0' }, // <-- Dato no provisto por PHP actualmente
-                   // { data: 'scheduled_date', defaultContent: 'N/A' }, // <-- Dato no provisto por PHP actualmente
-                   { data: 'interval_minutes', defaultContent: '<i>N/A</i>' }, // OK (asumiendo meta key _crm_interval_minutes) - Cambiado defaultContent
-                   { data: 'status', render: function(data, type, row) { // OK (usa get_post_status() en PHP)
-                       let statusClass = data ? data.toLowerCase() : 'unknown';
-                       let statusText = data || 'Desconocido';
-                       // Mapeo simple (ajustar según estados reales de WP o meta)
-                       if (statusText === 'publish') statusText = 'Publicada'; // Mapeo de ejemplo
-                       if (statusText === 'draft') statusText = 'Borrador';
-                       if (statusText === 'pending') statusText = 'Pendiente';
-                       // Añadir más mapeos si usas estados personalizados o meta fields
-                       // Ejemplo si usaras un meta field _crm_campaign_status:
-                       // if (row._crm_campaign_status === 'paused') statusText = 'Pausada';
-   
-                       return `<span class="campaign-status ${statusClass}">${escapeHtml(statusText)}</span>`;
-                   }},
-                   { data: null, orderable: false, searchable: false, render: function(data, type, row) { // OK (usa row.id que viene de get_the_ID())
-                       // Botones de acción (Editar, Eliminar, Pausar/Reanudar, Ver Detalles)
-                       let campaignId = escapeHtml(row.id); // Asumiendo que hay un ID
-                       let actions = `<button class="button button-small btn-edit-campaign" data-id="${campaignId}" title="Editar"><span class="dashicons dashicons-edit"></span></button> `;
-                       actions += `<button class="button button-small btn-delete-campaign" data-id="${campaignId}" title="Eliminar"><span class="dashicons dashicons-trash"></span></button> `;
-                       // Añadir más acciones según estado (ej: pausar si está enviando/pendiente)
-                       // Necesitarías ajustar la lógica de estado aquí también
-                       // if (row.status === 'publish' /* o tu estado 'activo' */) {
-                       //      actions += `<button class="button button-small btn-pause-campaign" data-id="${campaignId}" title="Pausar"><span class="dashicons dashicons-controls-pause"></span></button> `;
-                       // } else if (row.status === 'draft' /* o tu estado 'pausado' */) {
-                       //      actions += `<button class="button button-small btn-resume-campaign" data-id="${campaignId}" title="Reanudar/Publicar"><span class="dashicons dashicons-controls-play"></span></button> `;
-                       // }
-                       // actions += `<button class="button button-small btn-view-campaign" data-id="${campaignId}" title="Ver Detalles"><span class="dashicons dashicons-visibility"></span></button>`;
-                       return actions;
-                   }}
-               ],
-               language: dataTablesLang
-           });
-       }
+    function initCampaignsTable() {
+        crm_js_log('Inicializando DataTable para Campañas.');
+        if ($('#campaigns-table').length === 0) {
+            crm_js_log('Tabla #campaigns-table no encontrada en el DOM.', 'WARN');
+            return;
+        }
+        if (campaignsTable) {
+            crm_js_log('DataTable de Campañas ya inicializada. Refrescando datos...');
+            campaignsTable.ajax.reload();
+            return;
+        }
+
+        campaignsTable = $('#campaigns-table').DataTable({
+            processing: true,
+            serverSide: false, // Cambiar si es necesario
+            ajax: {
+                url: crm_evolution_sender_params.ajax_url,
+                type: 'POST',
+                data: {
+                    action: 'crm_get_campaigns',
+                    _ajax_nonce: crm_evolution_sender_params.nonce
+                },
+                dataSrc: function(json) {
+                    console.log(json) 
+                    if (!json || !json.success || !Array.isArray(json.data)) {
+                        crm_js_log('Error o formato inesperado en la respuesta AJAX para get_campaigns.', 'ERROR', json);
+                        showNotification('Error al cargar campañas.', 'error');
+                        return [];
+                    }
+                    crm_js_log('Datos de campañas recibidos:', json.data);
+                    return json.data;
+                },
+                error: function(xhr, status, error) {
+                    crm_js_log('Error AJAX al obtener campañas.', 'ERROR', { status: status, error: error, response: xhr.responseText });
+                    showNotification('Error de conexión al cargar campañas.', 'error');
+                }
+            },
+            columns: [
+                { data: 'name' }, // <--- CORREGIDO (coincide con get_the_title() en PHP)
+                { data: 'instance_name' }, // OK (asumiendo meta key _crm_instance_name)
+                { data: 'message', render: function(data, type, row){ return data ? escapeHtml(data).substring(0, 50) + '...' : ''; } }, // OK (asumiendo meta key _crm_message_content) - Añadido chequeo por si está vacío
+                { data: 'media_url', render: function(data, type, row){ return data ? `<a href="${escapeHtml(data)}" target="_blank">Ver Media</a>` : 'No'; } }, // OK (asumiendo meta key _crm_media_url)
+                { data: 'target_tag', defaultContent: '<i>N/A</i>' }, // OK (asumiendo meta key _crm_target_tag) - Cambiado defaultContent
+                // { data: 'recipients_count', defaultContent: '0' }, // <-- Dato no provisto por PHP actualmente
+                // { data: 'scheduled_date', defaultContent: 'N/A' }, // <-- Dato no provisto por PHP actualmente
+                { data: 'interval_minutes', defaultContent: '<i>N/A</i>' }, // OK (asumiendo meta key _crm_interval_minutes) - Cambiado defaultContent
+                { data: 'status', render: function(data, type, row) { // OK (usa get_post_status() en PHP)
+                    let statusClass = data ? data.toLowerCase() : 'unknown';
+                    let statusText = data || 'Desconocido';
+                    // Mapeo simple (ajustar según estados reales de WP o meta)
+                    if (statusText === 'publish') statusText = 'Publicada'; // Mapeo de ejemplo
+                    if (statusText === 'draft') statusText = 'Borrador';
+                    if (statusText === 'pending') statusText = 'Pendiente';
+                    // Añadir más mapeos si usas estados personalizados o meta fields
+                    // Ejemplo si usaras un meta field _crm_campaign_status:
+                    // if (row._crm_campaign_status === 'paused') statusText = 'Pausada';
+
+                    return `<span class="campaign-status ${statusClass}">${escapeHtml(statusText)}</span>`;
+                }},
+                { data: null, orderable: false, searchable: false, render: function(data, type, row) { // OK (usa row.id que viene de get_the_ID())
+                    // Botones de acción (Editar, Eliminar, Pausar/Reanudar, Ver Detalles)
+                    let campaignId = escapeHtml(row.id); // Asumiendo que hay un ID
+                    let actions = `<button class="button button-small btn-edit-campaign" data-id="${campaignId}" title="Editar"><span class="dashicons dashicons-edit"></span></button> `;
+                    actions += `<button class="button button-small btn-delete-campaign" data-id="${campaignId}" title="Eliminar"><span class="dashicons dashicons-trash"></span></button> `;
+                    // Añadir más acciones según estado (ej: pausar si está enviando/pendiente)
+                    // Necesitarías ajustar la lógica de estado aquí también
+                    // if (row.status === 'publish' /* o tu estado 'activo' */) {
+                    //      actions += `<button class="button button-small btn-pause-campaign" data-id="${campaignId}" title="Pausar"><span class="dashicons dashicons-controls-pause"></span></button> `;
+                    // } else if (row.status === 'draft' /* o tu estado 'pausado' */) {
+                    //      actions += `<button class="button button-small btn-resume-campaign" data-id="${campaignId}" title="Reanudar/Publicar"><span class="dashicons dashicons-controls-play"></span></button> `;
+                    // }
+                    // actions += `<button class="button button-small btn-view-campaign" data-id="${campaignId}" title="Ver Detalles"><span class="dashicons dashicons-visibility"></span></button>`;
+                    return actions;
+                }}
+            ],
+            language: dataTablesLang
+        });
+    }
    
     /**
      * Muestra una notificación usando SweetAlert2.
@@ -587,6 +587,80 @@
         });
     }
 
+    // --- INICIO: Manejador para el formulario de Añadir Instancia (Thickbox) ---
+    $(document).on('submit', '#add-instance-form', function(event) {
+        event.preventDefault(); // Prevenir envío normal del formulario
+
+        crm_js_log('Formulario #add-instance-form enviado.');
+
+        const $form = $(this);
+        const $submitButton = $('#submit-add-instance', $form); // Seleccionar el botón de submit
+        const originalButtonText = $submitButton.val(); // Guardar texto original del botón
+
+        const instanceName = $('#instance_name', $form).val().trim();
+        const nonce = $('#crm_create_instance_nonce', $form).val();
+        const webhookUrl = $('#webhook_url', $form).val();
+
+        // Validación básica (como antes)
+        if (!instanceName) {
+            showNotification('Error', 'error', 'El nombre de la instancia es obligatorio.');
+            return;
+        }
+        const pattern = /^[a-zA-Z0-9_-]+$/;
+        if (!pattern.test(instanceName)) {
+            showNotification('Nombre Inválido', 'error', 'El nombre solo puede contener letras, números, guiones bajos (_) y guiones medios (-).');
+            return;
+        }
+
+        // --- Deshabilitar botón y cambiar texto ANTES de AJAX ---
+        $submitButton.prop('disabled', true).val(crm_evolution_sender_params.i18n.creatingText);
+
+        // Preparar datos para AJAX (como antes)
+        const data = {
+            action: 'crm_create_instance',
+            _ajax_nonce: nonce,
+            instance_name: instanceName,
+            webhook_url: webhookUrl,
+        };
+
+        crm_js_log('Enviando datos AJAX para crear instancia:', 'DEBUG', data);
+
+        // Llamada AJAX
+        $.post(crm_evolution_sender_params.ajax_url, data)
+            .done(function(response) {
+                crm_js_log('Respuesta AJAX (crear instancia) recibida:', 'DEBUG', response);
+                if (response.success) {
+                    console.log(response)
+                    showNotification('¡Éxito!', 'success', response.data.message || 'Instancia creada correctamente.');
+                    tb_remove();
+                    if (instancesTable) {
+                        instancesTable.ajax.reload();
+                    } else {
+                        crm_js_log('Variable instancesTable no definida, no se puede recargar.', 'WARN');
+                    }
+                    showQrCode(instanceName)
+                } else {
+                    Swal.fire({
+                        icon: 'error',
+                        title: 'Error al Crear',
+                        text: response.data.message || 'Ocurrió un error desconocido.'
+                    });
+                    crm_js_log('Error devuelto por el servidor al crear instancia:', 'ERROR', response.data);
+                }
+            })
+            .fail(function(jqXHR, textStatus, errorThrown) {
+                crm_js_log('Error en la llamada AJAX (crear instancia):', 'ERROR', { status: textStatus, error: errorThrown });
+                Swal.fire({
+                    icon: 'error',
+                    title: 'Error de Comunicación',
+                    text: 'No se pudo conectar con el servidor. Detalles: ' + textStatus
+                });
+            })
+            .always(function() {
+            $submitButton.prop('disabled', false).val(originalButtonText);
+            });
+    });
+    // --- FIN: Manejador para el formulario de Añadir Instancia ---
 
     // ** usuarios **
  
@@ -714,101 +788,7 @@
      * Inicializa los manejadores de eventos generales.
      */
     function initEventHandlers() {
-        crm_js_log('Inicializando manejadores de eventos.');
-
-        // ** Pestaña Instancias **
-        $('#tab-instancias').on('click', '#btn-open-add-instance-modal', function() {
-            crm_js_log('Abriendo modal SweetAlert2 para añadir instancia.');
-            let miname = null
-            Swal.fire({
-                title: 'Añadir Nueva Instancia',
-                input: 'text',
-                inputLabel: 'Nombre de la Instancia',
-                inputPlaceholder: 'Ej: mi_tienda_principal',
-                inputAttributes: {
-                  autocapitalize: 'off',
-                  pattern: '^[a-zA-Z0-9_-]+$', // Añadir patrón para validación visual
-                  title: 'Solo letras, números, guiones bajos (_) y medios (-).'
-                },
-                showCancelButton: true,
-                confirmButtonText: 'Crear Instancia',
-                cancelButtonText: 'Cancelar',
-                showLoaderOnConfirm: true, // Muestra un loader en el botón de confirmar mientras se procesa
-                inputValidator: (value) => {
-                    if (!value) {
-                        return '¡El nombre de la instancia es obligatorio!';
-                    }
-                    const pattern = /^[a-zA-Z0-9_-]+$/;
-                    if (!pattern.test(value)) {
-                        return 'Nombre inválido. Use solo letras, números, _ o -.';
-                    }
-                    // Si pasa las validaciones, no retornar nada (o retornar null)
-                    return null;
-                },
-                preConfirm: (instanceName) => {
-                    // Esta función se ejecuta justo antes de cerrar el modal si la validación pasa.
-                    // Aquí hacemos la llamada AJAX.
-                    crm_js_log(`Intentando crear instancia: ${instanceName}`);
-                    miname = instanceName
-                    // Llamamos a performAjaxRequest y DEVOLVEMOS la promesa que genera
-                    return performAjaxRequest(
-                        'crm_create_instance',
-                        {
-                            instance_name: instanceName,
-                            // Ya no pedimos API Key en este modal simple
-                            // api_key: ''
-                        },
-                        function(response) {
-                            // onSuccess: Este callback se ejecutará si el AJAX tiene éxito
-                            // La promesa de preConfirm se resolverá con esta respuesta
-                            crm_js_log('Respuesta de creación recibida en preConfirm:', response);
-                            return response; // Devolver la respuesta para el .then() principal
-                        },
-                        function(errorResponse) {
-                            // onError: Este callback se ejecutará si el AJAX falla
-                            crm_js_log('Error en AJAX dentro de preConfirm:', errorResponse);
-                            // Mostrar el error usando la notificación de SweetAlert
-                            Swal.showValidationMessage(
-                                `Error al crear: ${errorResponse?.data?.message || 'Error desconocido'}`
-                            );
-                            // No devolver nada o devolver false para evitar que el modal se cierre
-                            return false;
-                        }
-                    ).catch(error => {
-                        // Capturar errores de red o fallos en performAjaxRequest no manejados
-                        Swal.showValidationMessage(`Error de solicitud: ${error}`);
-                        return false;
-                    });
-                },
-                allowOutsideClick: () => !Swal.isLoading() // Evitar cerrar haciendo clic fuera mientras carga
-            }).then((result) => {
-                console.log(result)
-                // Esta parte se ejecuta DESPUÉS de que preConfirm termina (y el AJAX se completa)
-                if (result.isConfirmed && result.value) {
-                    // result.value aquí contiene la respuesta del callback onSuccess de performAjaxRequest
-                    const response = result.value.data;
-                    const instanceName = miname // Obtener el nombre confirmado
-    
-                    showNotification('Instancia Creada', 'success', response.message || 'La instancia se creó correctamente.');
-                    if (instancesTable) {
-                        instancesTable.ajax.reload(); // Recargar la tabla
-                    }
-    
-                    // Comprobar si debemos mostrar el QR"connecting"
-                    console.log(instanceName)
-                    if (response.status === 'created' && instanceName) {
-                        crm_js_log(`Estado 'qrcode' detectado para ${instanceName}. Mostrando QR...`, 'INFO');
-                        showQrCode(instanceName);
-                    } else {
-                        crm_js_log(`Estado después de crear: ${response.status || 'desconocido'}. No se requiere QR.`, 'INFO');
-                    }
-                } else if (result.dismiss === Swal.DismissReason.cancel) {
-                    crm_js_log('Creación de instancia cancelada.');
-                }
-                // Si result.value fue `false` (por error en preConfirm), no hacemos nada más aquí.
-            });
-        });
-    
+        crm_js_log('Inicializando manejadores de eventos.');    
 
         $('#instances-table tbody').on('click', '.btn-delete-instance', function() {
             const instanceName = $(this).data('instance');
@@ -918,221 +898,221 @@
     }
 
 
-       // --- Ejecución Principal (DOM Ready) ---
-       $(document).ready(function() {
-           crm_js_log('DOM listo. Iniciando script del plugin.');
-   
-           // Verificar en qué pestaña estamos (leyendo la URL o un elemento específico)
-           const urlParams = new URLSearchParams(window.location.search);
-           const currentPage = urlParams.get('page');
-           const currentTab = urlParams.get('tab');
-   
-           crm_js_log(`Página actual: ${currentPage}, Pestaña: ${currentTab}`);
-   
-           // Inicializar DataTables y otros elementos específicos de la pestaña activa
-           if (currentPage === 'crm-evolution-sender-main') {
-               if (!currentTab || currentTab === 'instancias') {
-                   if ($('#instances-table').length) {
-                       initInstancesTable();
-                   } else {
-                        crm_js_log('Contenedor de tabla de instancias no encontrado al cargar.', 'WARN');
-                   }
-               } else if (currentTab === 'usuarios') {
-                    if ($('#users-table').length) {
-                       initUsersTable();
-                       // Inicializar intl-tel-input (si existe el campo)
-                       const phoneInputField = document.querySelector("#user_phone_input");
-                       if (phoneInputField) {
-                           crm_js_log('Inicializando intl-tel-input en #user_phone_input');
-                           try {
-                               phoneInputInstance = window.intlTelInput(phoneInputField, {
-                                   utilsScript: crm_evolution_sender_params.utils_script_path,
-                                   initialCountry: "auto",
-                                   geoIpLookup: function(callback) {
-                                       $.get("https://ipinfo.io", function() {}, "jsonp").always(function(resp) {
-                                           var countryCode = (resp && resp.country) ? resp.country : "pe";
-                                           callback(countryCode);
-                                       });
-                                   },
-                                   separateDialCode: true,
-                                   preferredCountries: ['pe', 'co', 'mx', 'es', 'ar', 'us'],
-                                   nationalMode: false,
-                                   autoPlaceholder: "polite"
-                               });
-                               crm_js_log('Instancia de intl-tel-input creada.');
-                           } catch (error) {
-                               crm_js_log('Error al inicializar intl-tel-input.', 'ERROR', error);
-                               showNotification('Error', 'error', 'No se pudo inicializar el campo de teléfono.');
-                           }
-                       } else {
-                           crm_js_log('#user_phone_input no encontrado en el DOM al cargar la pestaña de usuarios.', 'WARN');
-                       }
-                   } else {
-                        crm_js_log('Contenedor de tabla de usuarios no encontrado al cargar.', 'WARN');
-                   }
-               } else if (currentTab === 'marketing') {
-                    if ($('#campaigns-table').length) {
-                       initCampaignsTable();
-                   } else {
-                        crm_js_log('Contenedor de tabla de campañas no encontrado al cargar.', 'WARN');
-                   }
-                   // Cargar selects del modal de campañas (ya lo tienes fuera, pero aquí también es válido si solo se usa en esta pestaña)
-                   // if ($('#marketing-modal-content').length) {
-                   //     loadCampaignModalSelects();
-                   // }
-               }
-           }
-   
-           // --- INICIO: Lógica para Pestaña Marketing (Formulario y Media) ---
-   
-           const campaignForm = $('#campaign-form');
-           const campaignModalContent = $('#marketing-modal-content'); // Contenedor del modal
-   
-           // Manejar el envío del formulario de Campaña (Crear/Actualizar)
-           if (campaignForm.length) {
-               // Usar .off().on() para evitar múltiples bindings si este código se ejecuta más de una vez
-               campaignForm.off('submit.crmCampaign').on('submit.crmCampaign', function(event) {
-                   event.preventDefault(); // Evitar envío normal del formulario
-                   crm_js_log('Formulario de campaña enviado.');
-   
-                   const submitButton = $(this).find('input[type="submit"]');
-                   // Guardar el texto original ANTES de deshabilitar
-                   const originalButtonText = submitButton.val();
-                   submitButton.val('Guardando...').prop('disabled', true);
-   
-                   // Recoger datos del formulario
-                   const formData = {
-                       action: 'crm_save_campaign', // La acción AJAX que creamos en PHP
-                       _ajax_nonce: crm_evolution_sender_params.nonce,
-                       campaign_id: $('#campaign_id').val(), // ID para saber si es edición
-                       campaign_name: $('#campaign_name').val(),
-                       campaign_instance: $('#campaign_instance').val(),
-                       campaign_target_tag: $('#campaign_target_tag').val(),
-                       campaign_interval: $('#campaign_interval').val() || 5, // Valor por defecto si está vacío
-                       campaign_media_url: $('#campaign_media_url').val(),
-                       campaign_message: $('#campaign_message').val()
-                   };
-   
-                   crm_js_log('Datos a enviar para guardar campaña:', 'DEBUG', formData);
-   
-                   // Realizar la petición AJAX
-                   $.ajax({
-                       url: crm_evolution_sender_params.ajax_url,
-                       type: 'POST',
-                       data: formData,
-                       success: function(response) {
-                           if (response.success) {
-                               crm_js_log('Respuesta AJAX éxito (guardar campaña):', 'INFO', response);
-                               showNotification(response.data.message || 'Campaña guardada correctamente.', 'success');
-                               tb_remove(); // Cerrar el modal Thickbox
-   
-                               // Resetear el formulario
-                               campaignForm[0].reset();
-                               $('#campaign_id').val(''); // Limpiar ID oculto
-                               $('#media-filename').text('').hide(); // Limpiar nombre de archivo multimedia
-                               $('#clear-media-button').hide(); // Ocultar botón de limpiar media
-   
-                               // Recargar la tabla de campañas si ya está inicializada
-                               if (typeof campaignsTable !== 'undefined' && campaignsTable) {
-                                   campaignsTable.ajax.reload();
-                                   crm_js_log('Tabla de campañas recargada.');
-                               } else {
-                                   crm_js_log('Variable campaignsTable no definida, no se puede recargar.', 'WARN');
-                                   // Si la tabla no estaba inicializada (ej: primera campaña), inicializarla ahora
-                                   if ($('#campaigns-table').length) {
-                                        initCampaignsTable();
-                                   }
-                               }
-                           } else {
-                               crm_js_log('Respuesta AJAX error (guardar campaña):', 'ERROR', response);
-                               showNotification(response.data.message || 'Error desconocido al guardar.', 'error');
-                           }
-                       },
-                       error: function(xhr, status, error) {
-                           crm_js_log('Error AJAX (guardar campaña):', 'ERROR', { status: status, error: error, response: xhr.responseText });
-                           showNotification('Error de conexión al guardar la campaña.', 'error');
-                       },
-                       complete: function() {
-                           // Restaurar el botón de envío usando la variable guardada
-                           submitButton.val(originalButtonText).prop('disabled', false);
-                       }
-                   });
-               });
-           } else {
-               crm_js_log('Formulario #campaign-form no encontrado.', 'WARN');
-           }
-   
-           // --- Lógica para los botones de seleccionar/limpiar multimedia ---
-           const mediaInput = $('#campaign_media_url');
-           const mediaFilename = $('#media-filename');
-           const selectMediaButton = $('#select-media-button');
-           const clearMediaButton = $('#clear-media-button');
-           let mediaFrame; // Variable para guardar la instancia del media uploader
-   
-           if (selectMediaButton.length && mediaInput.length) {
-               // Usar delegación de eventos con $(document) para asegurar que funcione incluso si el modal se carga dinámicamente
-               // Usar .off().on() para evitar bindings múltiples
-               $(document).off('click.crmMedia', '#select-media-button').on('click.crmMedia', '#select-media-button', function(event) {
+    // --- Ejecución Principal (DOM Ready) ---
+    $(document).ready(function() {
+        crm_js_log('DOM listo. Iniciando script del plugin.');
+
+        // Verificar en qué pestaña estamos (leyendo la URL o un elemento específico)
+        const urlParams = new URLSearchParams(window.location.search);
+        const currentPage = urlParams.get('page');
+        const currentTab = urlParams.get('tab');
+
+        crm_js_log(`Página actual: ${currentPage}, Pestaña: ${currentTab}`);
+
+        // Inicializar DataTables y otros elementos específicos de la pestaña activa
+        if (currentPage === 'crm-evolution-sender-main') {
+            if (!currentTab || currentTab === 'instancias') {
+                if ($('#instances-table').length) {
+                    initInstancesTable();
+                } else {
+                    crm_js_log('Contenedor de tabla de instancias no encontrado al cargar.', 'WARN');
+                }
+            } else if (currentTab === 'usuarios') {
+                if ($('#users-table').length) {
+                    initUsersTable();
+                    // Inicializar intl-tel-input (si existe el campo)
+                    const phoneInputField = document.querySelector("#user_phone_input");
+                    if (phoneInputField) {
+                        crm_js_log('Inicializando intl-tel-input en #user_phone_input');
+                        try {
+                            phoneInputInstance = window.intlTelInput(phoneInputField, {
+                                utilsScript: crm_evolution_sender_params.utils_script_path,
+                                initialCountry: "auto",
+                                geoIpLookup: function(callback) {
+                                    $.get("https://ipinfo.io", function() {}, "jsonp").always(function(resp) {
+                                        var countryCode = (resp && resp.country) ? resp.country : "pe";
+                                        callback(countryCode);
+                                    });
+                                },
+                                separateDialCode: true,
+                                preferredCountries: ['pe', 'co', 'mx', 'es', 'ar', 'us'],
+                                nationalMode: false,
+                                autoPlaceholder: "polite"
+                            });
+                            crm_js_log('Instancia de intl-tel-input creada.');
+                        } catch (error) {
+                            crm_js_log('Error al inicializar intl-tel-input.', 'ERROR', error);
+                            showNotification('Error', 'error', 'No se pudo inicializar el campo de teléfono.');
+                        }
+                    } else {
+                        crm_js_log('#user_phone_input no encontrado en el DOM al cargar la pestaña de usuarios.', 'WARN');
+                    }
+                } else {
+                    crm_js_log('Contenedor de tabla de usuarios no encontrado al cargar.', 'WARN');
+                }
+            } else if (currentTab === 'marketing') {
+                if ($('#campaigns-table').length) {
+                    initCampaignsTable();
+                } else {
+                    crm_js_log('Contenedor de tabla de campañas no encontrado al cargar.', 'WARN');
+                }
+                // Cargar selects del modal de campañas (ya lo tienes fuera, pero aquí también es válido si solo se usa en esta pestaña)
+                // if ($('#marketing-modal-content').length) {
+                //     loadCampaignModalSelects();
+                // }
+            }
+        }
+
+        // --- INICIO: Lógica para Pestaña Marketing (Formulario y Media) ---
+
+        const campaignForm = $('#campaign-form');
+        const campaignModalContent = $('#marketing-modal-content'); // Contenedor del modal
+
+        // Manejar el envío del formulario de Campaña (Crear/Actualizar)
+        if (campaignForm.length) {
+            // Usar .off().on() para evitar múltiples bindings si este código se ejecuta más de una vez
+            campaignForm.off('submit.crmCampaign').on('submit.crmCampaign', function(event) {
+                event.preventDefault(); // Evitar envío normal del formulario
+                crm_js_log('Formulario de campaña enviado.');
+
+                const submitButton = $(this).find('input[type="submit"]');
+                // Guardar el texto original ANTES de deshabilitar
+                const originalButtonText = submitButton.val();
+                submitButton.val('Guardando...').prop('disabled', true);
+
+                // Recoger datos del formulario
+                const formData = {
+                    action: 'crm_save_campaign', // La acción AJAX que creamos en PHP
+                    _ajax_nonce: crm_evolution_sender_params.nonce,
+                    campaign_id: $('#campaign_id').val(), // ID para saber si es edición
+                    campaign_name: $('#campaign_name').val(),
+                    campaign_instance: $('#campaign_instance').val(),
+                    campaign_target_tag: $('#campaign_target_tag').val(),
+                    campaign_interval: $('#campaign_interval').val() || 5, // Valor por defecto si está vacío
+                    campaign_media_url: $('#campaign_media_url').val(),
+                    campaign_message: $('#campaign_message').val()
+                };
+
+                crm_js_log('Datos a enviar para guardar campaña:', 'DEBUG', formData);
+
+                // Realizar la petición AJAX
+                $.ajax({
+                    url: crm_evolution_sender_params.ajax_url,
+                    type: 'POST',
+                    data: formData,
+                    success: function(response) {
+                        if (response.success) {
+                            crm_js_log('Respuesta AJAX éxito (guardar campaña):', 'INFO', response);
+                            showNotification(response.data.message || 'Campaña guardada correctamente.', 'success');
+                            tb_remove(); // Cerrar el modal Thickbox
+
+                            // Resetear el formulario
+                            campaignForm[0].reset();
+                            $('#campaign_id').val(''); // Limpiar ID oculto
+                            $('#media-filename').text('').hide(); // Limpiar nombre de archivo multimedia
+                            $('#clear-media-button').hide(); // Ocultar botón de limpiar media
+
+                            // Recargar la tabla de campañas si ya está inicializada
+                            if (typeof campaignsTable !== 'undefined' && campaignsTable) {
+                                campaignsTable.ajax.reload();
+                                crm_js_log('Tabla de campañas recargada.');
+                            } else {
+                                crm_js_log('Variable campaignsTable no definida, no se puede recargar.', 'WARN');
+                                // Si la tabla no estaba inicializada (ej: primera campaña), inicializarla ahora
+                                if ($('#campaigns-table').length) {
+                                    initCampaignsTable();
+                                }
+                            }
+                        } else {
+                            crm_js_log('Respuesta AJAX error (guardar campaña):', 'ERROR', response);
+                            showNotification(response.data.message || 'Error desconocido al guardar.', 'error');
+                        }
+                    },
+                    error: function(xhr, status, error) {
+                        crm_js_log('Error AJAX (guardar campaña):', 'ERROR', { status: status, error: error, response: xhr.responseText });
+                        showNotification('Error de conexión al guardar la campaña.', 'error');
+                    },
+                    complete: function() {
+                        // Restaurar el botón de envío usando la variable guardada
+                        submitButton.val(originalButtonText).prop('disabled', false);
+                    }
+                });
+            });
+        } else {
+            crm_js_log('Formulario #campaign-form no encontrado.', 'WARN');
+        }
+
+        // --- Lógica para los botones de seleccionar/limpiar multimedia ---
+        const mediaInput = $('#campaign_media_url');
+        const mediaFilename = $('#media-filename');
+        const selectMediaButton = $('#select-media-button');
+        const clearMediaButton = $('#clear-media-button');
+        let mediaFrame; // Variable para guardar la instancia del media uploader
+
+        if (selectMediaButton.length && mediaInput.length) {
+            // Usar delegación de eventos con $(document) para asegurar que funcione incluso si el modal se carga dinámicamente
+            // Usar .off().on() para evitar bindings múltiples
+            $(document).off('click.crmMedia', '#select-media-button').on('click.crmMedia', '#select-media-button', function(event) {
+                event.preventDefault();
+                crm_js_log('Botón Seleccionar Media clickeado.');
+
+                // Si ya existe un frame, simplemente ábrelo
+                if (mediaFrame) {
+                    mediaFrame.open();
+                    return;
+                }
+
+                // Crear un nuevo media frame
+                mediaFrame = wp.media({
+                    title: 'Seleccionar o Subir Multimedia',
+                    button: {
+                        text: 'Usar este archivo'
+                    },
+                    multiple: false // No permitir selección múltiple
+                });
+
+                // Cuando se selecciona un archivo
+                mediaFrame.on('select', function() {
+                    const attachment = mediaFrame.state().get('selection').first().toJSON();
+                    mediaInput.val(attachment.url); // Poner la URL en el input
+                    // Mostrar solo el nombre del archivo, no la ruta completa
+                    mediaFilename.text('Archivo: ' + (attachment.filename || attachment.url.split('/').pop())).show();
+                    clearMediaButton.show(); // Mostrar botón de limpiar
+                    crm_js_log('Archivo multimedia seleccionado:', 'DEBUG', attachment);
+                });
+
+                // Abrir el media frame
+                mediaFrame.open();
+            });
+
+            // Lógica para el botón de limpiar multimedia
+            if (clearMediaButton.length) {
+                $(document).off('click.crmMedia', '#clear-media-button').on('click.crmMedia', '#clear-media-button', function(event) {
                     event.preventDefault();
-                    crm_js_log('Botón Seleccionar Media clickeado.');
-   
-                   // Si ya existe un frame, simplemente ábrelo
-                   if (mediaFrame) {
-                       mediaFrame.open();
-                       return;
-                   }
-   
-                   // Crear un nuevo media frame
-                   mediaFrame = wp.media({
-                       title: 'Seleccionar o Subir Multimedia',
-                       button: {
-                           text: 'Usar este archivo'
-                       },
-                       multiple: false // No permitir selección múltiple
-                   });
-   
-                   // Cuando se selecciona un archivo
-                   mediaFrame.on('select', function() {
-                       const attachment = mediaFrame.state().get('selection').first().toJSON();
-                       mediaInput.val(attachment.url); // Poner la URL en el input
-                       // Mostrar solo el nombre del archivo, no la ruta completa
-                       mediaFilename.text('Archivo: ' + (attachment.filename || attachment.url.split('/').pop())).show();
-                       clearMediaButton.show(); // Mostrar botón de limpiar
-                       crm_js_log('Archivo multimedia seleccionado:', 'DEBUG', attachment);
-                   });
-   
-                   // Abrir el media frame
-                   mediaFrame.open();
-               });
-   
-               // Lógica para el botón de limpiar multimedia
-               if (clearMediaButton.length) {
-                    $(document).off('click.crmMedia', '#clear-media-button').on('click.crmMedia', '#clear-media-button', function(event) {
-                       event.preventDefault();
-                       mediaInput.val(''); // Limpiar input
-                       mediaFilename.text('').hide(); // Ocultar nombre de archivo
-                       $(this).hide(); // Ocultar este botón
-                       crm_js_log('Campo multimedia limpiado.');
-                   });
-   
-                   // Opcional: Mostrar botón limpiar si el campo ya tiene valor al abrir modal (para editar)
-                   // Esto se manejaría mejor al *abrir* el modal para editar, no aquí globalmente.
-               }
-   
-           } else {
-               crm_js_log('Botón #select-media-button o input #campaign_media_url no encontrado.', 'WARN');
-           }
-   
-           // --- FIN: Lógica para Pestaña Marketing ---
-   
-   
-           // Inicializar los manejadores de eventos generales (YA EXISTENTE)
-           // Asegúrate de que initEventHandlers() no duplique los manejadores que acabamos de poner aquí.
-           // Si initEventHandlers() ya maneja los botones de media o el submit del form, quita el código duplicado de allí.
-           initEventHandlers();
-   
-           crm_js_log('Script del plugin CRM Evolution Sender inicializado completamente.');
-       }); // Fin de $(document).ready
+                    mediaInput.val(''); // Limpiar input
+                    mediaFilename.text('').hide(); // Ocultar nombre de archivo
+                    $(this).hide(); // Ocultar este botón
+                    crm_js_log('Campo multimedia limpiado.');
+                });
+
+                // Opcional: Mostrar botón limpiar si el campo ya tiene valor al abrir modal (para editar)
+                // Esto se manejaría mejor al *abrir* el modal para editar, no aquí globalmente.
+            }
+
+        } else {
+            crm_js_log('Botón #select-media-button o input #campaign_media_url no encontrado.', 'WARN');
+        }
+
+        // --- FIN: Lógica para Pestaña Marketing ---
+
+
+        // Inicializar los manejadores de eventos generales (YA EXISTENTE)
+        // Asegúrate de que initEventHandlers() no duplique los manejadores que acabamos de poner aquí.
+        // Si initEventHandlers() ya maneja los botones de media o el submit del form, quita el código duplicado de allí.
+        initEventHandlers();
+
+        crm_js_log('Script del plugin CRM Evolution Sender inicializado completamente.');
+    }); // Fin de $(document).ready
    
 
 })(jQuery); // Fin de la encapsulación
