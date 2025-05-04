@@ -897,6 +897,107 @@
         crm_js_log('Manejadores de eventos inicializados.');
     }
 
+    /**
+     * Cambia la vista de detalles del contacto a modo edición.
+     */
+    function switchToEditMode(userId) {
+        const $ = jQuery;
+        const $detailsContainer = $('#contact-details-content');
+        crm_js_log(`Cambiando a modo edición para User ID: ${userId}`);
+
+        // Guardar datos actuales antes de reemplazar
+        const currentData = {
+            name: $detailsContainer.find('label:contains("Nombre:")').next('span').text(),
+            phone: $detailsContainer.find('label:contains("Teléfono:")').next('span').text(),
+            email: $detailsContainer.find('label:contains("Email:")').next('span').text(),
+            tagKey: $detailsContainer.find('label:contains("Etiqueta:")').next('span.tag-badge').data('tag-key'),
+            notes: $detailsContainer.find('.contact-notes').html().replace(/<br\s*\/?>/gi, '\n').replace(/<i>Sin notas<\/i>/i, '').trim() // Convertir <br> a \n y quitar placeholder
+        };
+        crm_js_log('Datos actuales para edición:', 'DEBUG', currentData);
+
+        // Reemplazar spans con inputs/textarea/select
+        $detailsContainer.find('label:contains("Nombre:")').next('span').replaceWith(`<input type="text" id="edit-contact-name" class="regular-text" value="${escapeHtml(currentData.name)}">`);
+        $detailsContainer.find('label:contains("Teléfono:")').nextAll().remove(); // Quitar span y small(JID)
+        $detailsContainer.find('label:contains("Teléfono:")').after(`<input type="text" id="edit-contact-phone" class="regular-text" value="${escapeHtml(currentData.phone)}" readonly title="El teléfono se sincroniza desde WhatsApp, no se puede editar aquí.">`); // Teléfono no editable
+        $detailsContainer.find('label:contains("Email:")').next('span').replaceWith(`<input type="email" id="edit-contact-email" class="regular-text" value="${escapeHtml(currentData.email)}">`);
+
+        // Reemplazar span de etiqueta con un select (requiere cargar etiquetas)
+        const $tagSpan = $detailsContainer.find('label:contains("Etiqueta:")').next('span.tag-badge');
+        const $tagSelect = $('<select id="edit-contact-tag" class="regular-text"></select>');
+        $tagSpan.replaceWith($tagSelect);
+        // Cargar opciones de etiquetas (similar a como se hizo para campañas)
+        loadTagsIntoSelect($tagSelect, currentData.tagKey); // Nueva función auxiliar
+
+        // Reemplazar div de notas con textarea
+        $detailsContainer.find('.contact-notes').replaceWith(`<textarea id="edit-contact-notes" class="large-text" rows="4">${escapeHtml(currentData.notes)}</textarea>`);
+
+        // Cambiar botones
+        const $buttonContainer = $detailsContainer.find('div[style*="text-align: right"]');
+        $buttonContainer.html(`
+            <button id="save-contact-button" class="button button-primary" data-user-id="${userId}"><span class="dashicons dashicons-saved" style="vertical-align: middle; margin-top: -2px;"></span> Guardar</button>
+            <button id="cancel-edit-button" class="button button-secondary" data-user-id="${userId}">Cancelar</button>
+        `);
+    }
+
+    /**
+     * Carga las etiquetas disponibles en un elemento select.
+     * @param {jQuery} $selectElement El elemento select jQuery.
+     * @param {string} selectedKey La clave de la etiqueta actualmente seleccionada.
+     */
+    function loadTagsIntoSelect($selectElement, selectedKey) {
+        $selectElement.html('<option value="">Cargando...</option>'); // Placeholder
+        performAjaxRequest(
+            'crm_get_etiquetas_for_select', // Reutilizar acción AJAX
+            {},
+            function(tags) { // onSuccess
+                $selectElement.empty().append('<option value="">-- Sin Etiqueta --</option>'); // Opción por defecto
+                if (tags && tags.length > 0) {
+                    tags.forEach(tag => {
+                        const $option = $('<option>', { value: tag.value, text: tag.text });
+                        if (tag.value === selectedKey) {
+                            $option.prop('selected', true);
+                        }
+                        $selectElement.append($option);
+                    });
+                }
+            }
+            // onError es manejado por performAjaxRequest
+        );
+    }
+
+    /**
+     * Guarda los detalles modificados del contacto vía AJAX.
+     */
+    function saveContactDetails(userId) {
+        const $ = jQuery;
+        const $detailsContainer = $('#contact-details-content');
+        crm_js_log(`Intentando guardar detalles para User ID: ${userId}`);
+
+        // Recoger datos del formulario de edición
+        const updatedData = {
+            user_id: userId,
+            name: $('#edit-contact-name').val(),
+            email: $('#edit-contact-email').val(),
+            tag_key: $('#edit-contact-tag').val(),
+            notes: $('#edit-contact-notes').val()
+        };
+        crm_js_log('Datos a enviar para guardar:', 'DEBUG', updatedData);
+
+        // Deshabilitar botones mientras guarda
+        $('#save-contact-button, #cancel-edit-button').prop('disabled', true);
+
+        performAjaxRequest(
+            'crm_save_contact_details', // Nueva acción AJAX
+            updatedData,
+            function(response) { // onSuccess
+                crm_js_log('Detalles guardados correctamente. Respuesta:', 'INFO', response);
+                showNotification('Contacto actualizado', 'success');
+                // Volver a cargar los detalles para mostrar la vista normal actualizada
+                loadContactDetails(userId);
+            }
+            // onError es manejado por performAjaxRequest y muestra notificación
+        ).always(function() { $('#save-contact-button, #cancel-edit-button').prop('disabled', false); }); // Reactivar botones
+    }
 
     // --- Ejecución Principal (DOM Ready) ---
     $(document).ready(function() {
@@ -1116,28 +1217,53 @@
         // --- INICIO: Lógica para Historial de Chats ---
         // Solo ejecutar en la página de historial de chats
         if ($('#crm-chat-container').length) {
+            // 1. Asegurar estado inicial oculto del sidebar
+            $('#contact-details-column').removeClass('is-visible'); // Quitar clase al inicio por si acaso
+
+            // 2. Log y cargar conversaciones iniciales
             crm_js_log('Página de Historial de Chats detectada. Cargando conversaciones...');
             loadRecentConversations();
-        }
-        // --- FIN: Lógica para Historial de Chats ---
-        if ($('#crm-chat-container').length) initChatHeartbeat(); // <--- ¡Aquí está!
-        // --- INICIO: Lógica para Buscador de Chats ---
-        // ¡Llamar a la función para activar el buscador!
-        if ($('#crm-chat-container').length) {
-            crm_js_log('[BUSCADOR] Contenedor #crm-chat-container encontrado. Llamando a initChatSearchHandler().');
+
+            // 3. Inicializar Heartbeat
+            crm_js_log('Inicializando Heartbeat para chat...');
+            initChatHeartbeat();
+
+            // 4. Inicializar Buscador y botón cerrar sidebar
+            crm_js_log('Inicializando Buscador de Chats y handler de cierre de sidebar...');
             initChatSearchHandler();
+            initCloseContactDetailsHandler(); // <-- Añadir la llamada aquí
+
+            // --- INICIO: Listener para el botón Editar Contacto ---
+            // Usar delegación en un contenedor estático superior si #contact-details-content se recarga
+            $(document).on('click', '#edit-contact-button', function() {
+                const userId = $(this).data('user-id');
+                switchToEditMode(userId);
+            });
+            // --- FIN: Listener para el botón Editar Contacto ---
+
+            // --- INICIO: Listener para el botón Guardar Contacto ---
+            $(document).on('click', '#save-contact-button', function() {
+                const userId = $(this).data('user-id');
+                saveContactDetails(userId);
+            });
+            // --- FIN: Listener para el botón Guardar Contacto ---
+
+            // --- INICIO: Listener para el botón Cancelar Edición ---
+            $(document).on('click', '#cancel-edit-button', function() {
+                const userId = $(this).data('user-id');
+                loadContactDetails(userId); // Simplemente recargar los detalles originales
+            });
+            // --- FIN: Listener para el botón Editar Contacto ---
         } else {
-            crm_js_log('[BUSCADOR] Contenedor #crm-chat-container NO encontrado. initChatSearchHandler() NO se llamará.', 'WARN');
+            crm_js_log('Contenedor #crm-chat-container NO encontrado. Lógica de chat no se ejecutará.', 'WARN');
         }
-
-
         // *** FIN PRUEBA DEPURACIÓN GLOBAL DE CLICS ***
 
         /**
-             * =========================================================================
-             * == BUSCADOR DE CHATS (Funciones) ==
-             * =========================================================================
-             */
+         * =========================================================================
+         * == BUSCADOR DE CHATS (Funciones) ==
+         * =========================================================================
+        */
 
         let searchDebounceTimer; // Timer para debounce
         const SEARCH_DEBOUNCE_DELAY = 300; // Milisegundos de espera antes de buscar
@@ -1164,11 +1290,14 @@
                     const searchTerm = $(this).val().trim().toLowerCase();
                     crm_js_log(`Buscando chats/usuarios: "${searchTerm}"`);
 
+                    // Ocultar columna de detalles al iniciar/modificar búsqueda
+                    $('#contact-details-column').css('display', 'none'); // <-- Volver a display: none
+
                     // 1. Limpiar resultados de búsqueda de WP anteriores
                     $chatListContainer.find('.wp-user-search-result, .wp-user-search-loading, .wp-user-search-no-results, .wp-user-search-error').remove(); // Limpiar todo lo relacionado a búsqueda WP
 
                     // 2. Decidir si buscar vía AJAX o mostrar lista original
-                    if (searchTerm.length >= MIN_SEARCH_LENGTH) {
+                    if (searchTerm.length >= MIN_SEARCH_LENGTH) { // Buscar usuarios WP
                         // Ocultar la lista original y buscar en WP
                         crm_js_log(`[BUSCADOR] Término >= ${MIN_SEARCH_LENGTH}. Ocultando lista original y buscando usuarios WP...`);
                         $chatListContainer.find('.chat-list-item:not(.wp-user-search-result)').hide(); // Ocultar originales
@@ -1178,7 +1307,7 @@
                         crm_js_log('[BUSCADOR] Término vacío. Mostrando lista original.');
                         $chatListContainer.find('.chat-list-item:not(.wp-user-search-result)').show();
                     } else {
-                        // Si el término es corto (1 o 2 caracteres), simplemente mostrar la lista original
+                        // Si el término es corto, mostrar la lista original
                         crm_js_log(`[BUSCADOR] Término corto (< ${MIN_SEARCH_LENGTH}). Mostrando lista original.`);
                         $chatListContainer.find('.chat-list-item:not(.wp-user-search-result)').show();
 
@@ -1233,6 +1362,30 @@
             );
         }
 
+           
+        /**
+         * Inicializa el manejador para el botón de cerrar el sidebar de detalles.
+         */
+        function initCloseContactDetailsHandler() {
+            const $ = jQuery;
+            // Usar delegación por si el sidebar se añade/quita dinámicamente (aunque ahora es fijo)
+            $(document).on('click', '#close-contact-details', function() {
+                crm_js_log('Botón Cerrar Detalles clickeado.');
+                $('#contact-details-column').css('display', 'none'); // <-- Volver a display: none
+
+                // Opcional: Desmarcar el chat activo en la lista izquierda para que no quede seleccionado
+                $('#chat-list-items .chat-list-item.active').removeClass('active');
+                currentOpenChatUserId = null; // Indicar que no hay chat abierto (si usas esta variable)
+
+                // Opcional: Podrías también limpiar el área de mensajes y ocultar el input si lo deseas
+                // $('#chat-messages-area').empty().html('<p>Selecciona una conversación para empezar.</p>');
+                // $('#chat-input-area').hide();
+            });
+            crm_js_log('Handler para #close-contact-details inicializado.'); // Log para confirmar
+        }
+        
+             
+         
         crm_js_log('Script del plugin CRM Evolution Sender inicializado completamente.');
     }); // Fin de $(document).ready
    
@@ -1304,36 +1457,39 @@
         });
     }
 
-    /**
-     * Añade el manejador de clicks a los items de la lista de chat usando delegación.
-     */
-    function addChatListItemClickHandler() {
-        const $ = jQuery;
-        // Usar .off().on() para evitar múltiples bindings si se llama varias veces
-        $('#chat-list-items').off('click', '.chat-list-item').on('click', '.chat-list-item', function() {
-            const $clickedItem = $(this); // Guardar referencia al item clickeado
-            let userId = $clickedItem.data('user-id'); // Intentar obtener de data-user-id (chats existentes)
-
-            // Si no se encontró en data-user-id, intentar con data-wp-user-id (resultados búsqueda WP)
-            if (typeof userId === 'undefined' || userId === null) {
-                userId = $clickedItem.data('wp-user-id');
-            }
-
-            crm_js_log(`Click en chat list item. Intentando obtener User ID. Encontrado: ${userId} (Tipo: ${typeof userId})`); // <-- LOG DE VERIFICACIÓN
-
-            // Marcar como activo
-            $('#chat-list-items .chat-list-item.active').removeClass('active'); // Quitar clase solo al activo
-            $(this).addClass('active');
-
-            // Cargar mensajes
-
-            currentOpenChatUserId = userId; // <-- Guardar ID del chat abierto
-            lastDisplayedMessageTimestamp = 0; // <-- Resetear timestamp al abrir nuevo chat
+     /**
+      * Añade el manejador de clicks a los items de la lista de chat usando delegación.
+      */
+     function addChatListItemClickHandler() {
+         const $ = jQuery;
+         // Usar .off().on() para evitar múltiples bindings si se llama varias veces
+         $('#chat-list-items').off('click', '.chat-list-item').on('click', '.chat-list-item', function() {
+             const $clickedItem = $(this); // Guardar referencia al item clickeado
+             let userId = $clickedItem.data('user-id'); // Intentar obtener de data-user-id (chats existentes)
  
-            loadConversationMessages(userId);
-            $('#chat-input-area').show();
-        });
-    }
+             // Si no se encontró en data-user-id, intentar con data-wp-user-id (resultados búsqueda WP)
+             if (typeof userId === 'undefined' || userId === null) {
+                 userId = $clickedItem.data('wp-user-id');
+             }
+ 
+             crm_js_log(`Click en chat list item. Intentando obtener User ID. Encontrado: ${userId} (Tipo: ${typeof userId})`);
+ 
+             // Marcar como activo
+             $('#chat-list-items .chat-list-item.active').removeClass('active'); // Quitar clase solo al activo
+             $(this).addClass('active');
+             // Ocultar placeholder al seleccionar chat
+             $('#chat-messages-area').removeClass('chat-placeholder-active');
+ 
+             $('#contact-details-column').css('display', 'flex');
+             $('#contact-details-content').html('<p><span class="spinner is-active" style="float: none; vertical-align: middle;"></span> Cargando detalles...</p>');
+             loadContactDetails(userId);
+             currentOpenChatUserId = userId;
+             lastDisplayedMessageTimestamp = 0;
+             loadConversationMessages(userId);
+             $('#chat-input-area').show();
+         });
+     }
+ 
 
     /**
      * Carga los mensajes para una conversación específica vía AJAX.
@@ -1392,6 +1548,12 @@
                                         <span class="dashicons dashicons-media-default"></span> ${escapeHtml(msg.caption || msg.attachment_url.split('/').pop())}
                                     </a>
                                 </div>`;
+                        } else if (msg.type === 'audio' && msg.attachment_url) { // <-- Añadido para audio
+                            messageContentHtml = `
+                                <div class="message-media message-audio">
+                                    <audio controls preload="metadata" src="${escapeHtml(msg.attachment_url)}"></audio>
+                                </div>
+                                ${msg.caption ? `<div class="message-caption">${escapeHtml(msg.caption)}</div>` : ''} <!-- Aunque raro, soportar caption -->`;
                         } else { // Texto o tipo desconocido
                             messageContentHtml = `<div class="message-text">${escapeHtml(msg.text || msg.caption || '')}</div>`;
                         }
@@ -1618,7 +1780,73 @@
         });
     }
 
+    /**
+     * Carga los detalles de un contacto específico vía AJAX y los muestra en el sidebar.
+     * @param {number} userId El ID del usuario WP cuyos detalles cargar.
+     */
+    function loadContactDetails(userId) {
+        const $ = jQuery;
+        const $detailsContainer = $('#contact-details-content');
 
+        crm_js_log(`Solicitando detalles del contacto para User ID: ${userId}`);
+
+        // Mostrar indicador de carga (ya lo hacemos en el click handler, pero podemos asegurarlo aquí)
+        $detailsContainer.html('<p><span class="spinner is-active" style="float: none; vertical-align: middle;"></span> Cargando detalles...</p>');
+
+        performAjaxRequest(
+            'crm_get_contact_details', // Acción AJAX definida en PHP
+            { user_id: userId },       // Datos a enviar
+            function(details) { // onSuccess (recibe el objeto 'data' de la respuesta JSON)
+                crm_js_log('Detalles del contacto recibidos:', 'DEBUG', details);
+
+                // Construir el HTML con los detalles
+                // Usar escapeHtml para seguridad
+                const detailsHtml = `
+                    <div class="contact-avatar-area" style="text-align: center; margin-bottom: 15px;">
+                        <img src="${escapeHtml(details.avatar_url)}" alt="Avatar de ${escapeHtml(details.display_name)}" class="contact-details-avatar" style="width: 80px; height: 80px; border-radius: 50%; margin: 0 auto; display: block;">
+                    </div>
+                    <div class="form-field">
+                        <label>Nombre:</label>
+                        <span>${escapeHtml(details.display_name)}</span>
+                    </div>
+                    <div class="form-field">
+                        <label>Teléfono:</label>
+                        <span>${escapeHtml(details.phone)}</span>
+                        ${details.jid ? `<small style="display: block; color: #666;">(JID: ${escapeHtml(details.jid)})</small>` : ''}
+                    </div>
+                    <div class="form-field">
+                        <label>Email:</label>
+                        <span>${escapeHtml(details.email)}</span>
+                    </div>
+                    <div class="form-field">
+                        <label>Etiqueta:</label>
+                        <span class="tag-badge" data-tag-key="${escapeHtml(details.tag_key)}">${escapeHtml(details.tag_name)}</span>
+                        <!-- TODO: Añadir botón/icono para editar etiqueta -->
+                    </div>
+                    <div class="form-field">
+                        <label>Notas:</label>
+                        <div class="contact-notes" style="background-color: #f9f9f9; border: 1px solid #eee; padding: 10px; min-height: 50px; border-radius: 3px;">
+                            ${details.notes ? escapeHtml(details.notes).replace(/\n/g, '<br>') : '<i>Sin notas</i>'}
+                        </div>
+                        <!-- TODO: Añadir botón/icono para editar notas -->
+                    </div>
+                    <hr>
+                    <div style="text-align: right;">
+                            <button id="edit-contact-button" class="button" data-user-id="${details.user_id}"><span class="dashicons dashicons-edit" style="vertical-align: middle; margin-top: -2px;"></span> Editar</button>
+                    </div>
+                `;
+
+                // Insertar el HTML en el contenedor
+                $detailsContainer.html(detailsHtml);
+
+            },
+            function(errorResponse) { // onError (manejado parcialmente por performAjaxRequest)
+                crm_js_log('Error al cargar detalles del contacto.', 'ERROR', errorResponse);
+                $detailsContainer.html('<p class="error-message">No se pudieron cargar los detalles del contacto. ' + escapeHtml(errorResponse?.data?.message || '') + '</p>');
+            }
+        );
+    }
+    
     /**
      * Renderiza la vista previa de un archivo adjunto.
      * @param {object|null} attachment Objeto con datos del adjunto (url, filename, mime) o null para limpiar.
@@ -1679,6 +1907,8 @@
             messageContentHtml = `<div class="message-media"><a href="${escapeHtml(msg.attachment_url)}" target="_blank" title="Ver imagen completa"><img src="${escapeHtml(msg.attachment_url)}" alt="Imagen adjunta" loading="lazy"></a></div>${msg.caption ? `<div class="message-caption">${escapeHtml(msg.caption)}</div>` : ''}`;
         } else if (msg.type === 'video' && msg.attachment_url) {
             messageContentHtml = `<div class="message-media"><video controls preload="metadata" src="${escapeHtml(msg.attachment_url)}"></video></div>${msg.caption ? `<div class="message-caption">${escapeHtml(msg.caption)}</div>` : ''}`;
+        } else if (msg.type === 'audio' && msg.attachment_url) { // <-- Añadido para audio (también en renderSingleMessage)
+            messageContentHtml = `<div class="message-media message-audio"><audio controls preload="metadata" src="${escapeHtml(msg.attachment_url)}"></audio></div>${msg.caption ? `<div class="message-caption">${escapeHtml(msg.caption)}</div>` : ''}`;
         } else if (msg.type === 'document' && msg.attachment_url) {
             messageContentHtml = `<div class="message-document"><a href="${escapeHtml(msg.attachment_url)}" target="_blank" download><span class="dashicons dashicons-media-default"></span> ${escapeHtml(msg.caption || msg.attachment_url.split('/').pop())}</a></div>`;
         } else {

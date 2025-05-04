@@ -131,7 +131,16 @@ function crm_evolution_webhook_handler_callback( WP_REST_Request $request ) {
                  $message_type = 'video';
                  $media_caption = $message_info['videoMessage']['caption'] ?? null;
                  $media_mimetype = $message_info['videoMessage']['mimetype'] ?? 'video/mp4'; // Default
-            } // ... añadir más tipos: audio, document, location, etc.
+            } elseif (isset($message_info['audioMessage'])) {
+                $message_type = 'audio';
+                $media_caption = null; 
+                // Primero obtén el mimetype completo
+                $raw_mimetype = $message_info['audioMessage']['mimetype'] ?? 'audio/ogg'; // Obtener y poner default
+                // Ahora sí, divídelo
+                $mime_parts = explode(';', $raw_mimetype);
+                $media_mimetype = trim($mime_parts[0]); // Tomar solo la parte principal 'audio/ogg'
+            } 
+            // ... añadir más tipos: audio, document, location, etc.
 
             // Si hay base64 pero no se detectó tipo media, intentar deducir (o marcar como 'file')
             if ($base64_data && $message_type === 'unknown') {

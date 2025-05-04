@@ -1487,3 +1487,136 @@ function crm_send_whatsapp_media_message( $user_id, $attachment_url, $mime_type,
     // 7. Devolver la respuesta
     return $api_response;
 }
+
+/**
+ * Permite la subida de archivos OGG (audio) a la biblioteca de medios.
+ *
+ * @param array $mime_types Array de tipos MIME permitidos.
+ * @return array Array modificado.
+ */
+function crm_allow_ogg_upload( $mime_types ) {
+    // Añadir ogg => audio/ogg
+    // El tipo MIME completo puede ser 'audio/ogg; codecs=opus', pero WP generalmente solo necesita 'audio/ogg'
+    $mime_types['ogg'] = 'audio/ogg';
+    crm_log('Filtro upload_mimes: Añadiendo soporte para audio/ogg.', 'DEBUG'); // Log para confirmar que se ejecuta
+    return $mime_types;
+}
+add_filter( 'upload_mimes', 'crm_allow_ogg_upload', 10, 1 );
+
+// =========================================================================
+// == MANEJADORES AJAX - DETALLES DEL CONTACTO (SIDEBAR) ==
+// =========================================================================
+
+/**
+ * AJAX Handler para obtener los detalles de un contacto para el sidebar.
+ */
+function crm_get_contact_details_callback() {
+    crm_log( 'Recibida petición AJAX: crm_get_contact_details' );
+
+    // 1. Verificar Nonce y Permisos
+    check_ajax_referer( 'crm_evolution_sender_nonce', '_ajax_nonce' );
+    if ( ! current_user_can( 'edit_posts' ) ) { // Capacidad para ver chats/usuarios
+        crm_log( 'Error AJAX: Permiso denegado para crm_get_contact_details.', 'ERROR' );
+        wp_send_json_error( array( 'message' => 'No tienes permisos suficientes.' ), 403 );
+    }
+
+    // 2. Obtener y validar User ID
+    $user_id = isset( $_POST['user_id'] ) ? absint( $_POST['user_id'] ) : 0;
+    if ( $user_id <= 0 ) {
+        crm_log( 'Error AJAX: User ID inválido para crm_get_contact_details.', 'ERROR' );
+        wp_send_json_error( array( 'message' => 'ID de usuario inválido.' ), 400 );
+    }
+
+    // 3. Obtener datos del usuario
+    $user_data = get_userdata( $user_id );
+    if ( ! $user_data ) {
+        crm_log( "Error AJAX: No se encontró usuario con ID {$user_id}.", 'ERROR' );
+        wp_send_json_error( array( 'message' => 'Usuario no encontrado.' ), 404 );
+    }
+
+    // 4. Obtener metadatos relevantes
+    $phone = get_user_meta( $user_id, 'billing_phone', true ); // Teléfono E.164
+    $jid = get_user_meta( $user_id, '_crm_whatsapp_jid', true ); // JID
+    $tag_key = get_user_meta( $user_id, '_crm_lifecycle_tag', true ); // Clave de la etiqueta
+    $notes = get_user_meta( $user_id, '_crm_contact_notes', true ); // Notas (si las hubiera)
+
+    // Obtener nombre legible de la etiqueta
+    $all_tags = crm_get_lifecycle_tags();
+    $tag_name = isset( $all_tags[$tag_key] ) ? $all_tags[$tag_key] : $tag_key; // Mostrar clave si no se encuentra nombre
+
+    // 5. Preparar datos para la respuesta
+    $contact_details = array(
+        'user_id'      => $user_id,
+        'display_name' => $user_data->display_name,
+        'email'        => $user_data->user_email,
+        'phone'        => $phone ?: 'N/D',
+        'jid'          => $jid ?: 'N/D',
+        'tag_key'      => $tag_key ?: '', // Enviar clave para posible edición
+        'tag_name'     => $tag_name ?: 'Sin etiqueta', // Nombre legible
+        'notes'        => $notes ?: '', // Notas
+        'avatar_url'   => get_avatar_url( $user_id, ['size' => 96] ), // Avatar
+    );
+
+    crm_log( "Enviando detalles del contacto User ID: {$user_id} al frontend.", 'INFO' );
+    wp_send_json_success( $contact_details );
+}
+add_action( 'wp_ajax_crm_get_contact_details', 'crm_get_contact_details_callback' );
+
+/**
+ * AJAX Handler para guardar los detalles modificados de un contacto.
+ */
+function crm_save_contact_details_callback() {
+    crm_log( 'Recibida petición AJAX: crm_save_contact_details' );
+
+    // 1. Verificar Nonce y Permisos
+    check_ajax_referer( 'crm_evolution_sender_nonce', '_ajax_nonce' );
+    if ( ! current_user_can( 'edit_users' ) ) { // Capacidad para editar usuarios
+        crm_log( 'Error AJAX: Permiso denegado para crm_save_contact_details.', 'ERROR' );
+        wp_send_json_error( array( 'message' => 'No tienes permisos suficientes para editar usuarios.' ), 403 );
+    }
+
+    // 2. Obtener y sanitizar datos
+    $user_id = isset( $_POST['user_id'] ) ? absint( $_POST['user_id'] ) : 0;
+    $name    = isset( $_POST['name'] ) ? sanitize_text_field( wp_unslash( $_POST['name'] ) ) : '';
+    $email   = isset( $_POST['email'] ) ? sanitize_email( wp_unslash( $_POST['email'] ) ) : '';
+    $tag_key = isset( $_POST['tag_key'] ) ? sanitize_key( $_POST['tag_key'] ) : '';
+    $notes   = isset( $_POST['notes'] ) ? sanitize_textarea_field( wp_unslash( $_POST['notes'] ) ) : '';
+
+    // 3. Validar datos
+    if ( $user_id <= 0 ) {
+        wp_send_json_error( array( 'message' => 'ID de usuario inválido.' ), 400 );
+    }
+    if ( empty( $name ) ) {
+        wp_send_json_error( array( 'message' => 'El nombre no puede estar vacío.' ), 400 );
+    }
+    if ( ! is_email( $email ) ) {
+        wp_send_json_error( array( 'message' => 'El correo electrónico no es válido.' ), 400 );
+    }
+    // Verificar si el email ya existe para OTRO usuario
+    $existing_user = email_exists( $email );
+    if ( $existing_user && $existing_user != $user_id ) {
+        wp_send_json_error( array( 'message' => 'Este correo electrónico ya está en uso por otro usuario.' ), 409 ); // 409 Conflict
+    }
+
+    // 4. Actualizar datos del usuario WP
+    $user_data_update = array(
+        'ID'           => $user_id,
+        'display_name' => $name,
+        'user_email'   => $email,
+        // Podríamos actualizar first_name/last_name si los tuviéramos separados
+    );
+    $update_result = wp_update_user( $user_data_update );
+
+    if ( is_wp_error( $update_result ) ) {
+        crm_log( "Error al actualizar datos básicos del usuario {$user_id}: " . $update_result->get_error_message(), 'ERROR' );
+        wp_send_json_error( array( 'message' => 'Error al actualizar datos del usuario: ' . $update_result->get_error_message() ) );
+    }
+
+    // 5. Actualizar metadatos
+    update_user_meta( $user_id, '_crm_lifecycle_tag', $tag_key );
+    update_user_meta( $user_id, '_crm_contact_notes', $notes );
+
+    crm_log( "Detalles del contacto User ID: {$user_id} actualizados correctamente.", 'INFO' );
+    wp_send_json_success( array( 'message' => 'Contacto actualizado correctamente.' ) );
+}
+add_action( 'wp_ajax_crm_save_contact_details', 'crm_save_contact_details_callback' );

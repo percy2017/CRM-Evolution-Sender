@@ -130,10 +130,11 @@
 
 .crm-chat-history-page .crm-chat-container {
     display: flex; /* Activa Flexbox */
-    border: 1px solid #ccd0d4; /* Borde similar a WP */
+    border: 1px solid #ccd0d4;
     height: calc(100vh - 100px); /* Altura ajustable (resta altura del header/footer de WP y margen superior) - Ajusta el 100px según sea necesario */
     background-color: #f6f7f7; /* Fondo claro */
     margin-top: 20px;
+    /* overflow: hidden; */ /* <-- Prueba quitando esto del contenedor principal */
 }
 
 .crm-chat-history-page .chat-list-column {
@@ -270,23 +271,73 @@
    ESTILOS para Vista de Chat (Mensajes e Input)
    ========================================================================== */
 
-.crm-chat-history-page .chat-view-column { /* Contenedor de mensajes e input */
+   .crm-chat-history-page .chat-view-column { /* Contenedor de mensajes e input */
     flex-grow: 1; /* Ocupa el espacio restante */
     display: flex;
     flex-direction: column; /* Apila mensajes arriba, input abajo */
     background-color: #e5ddd5; /* Fondo tipo WhatsApp */
+    min-height: 0; /* AÑADIDO: Ayuda al contenedor flex padre a manejar el overflow del hijo */
     /* Podríamos añadir una imagen de fondo aquí con background-image */
-    overflow: hidden; /* Evita que el input se salga */
+    /* overflow: hidden; */ /* <-- ¡Quita o comenta esta línea! */
 }
 
 .crm-chat-history-page .chat-messages-area { /* Área donde van las burbujas */
     flex-grow: 1; /* Ocupa todo el espacio vertical disponible */
+    overflow-y: auto;
+    
+    min-height: 0; /* <-- DESCOMENTAR: Ayuda a Flexbox con el overflow */
     padding: 20px;
-    overflow-y: auto; /* Scroll si los mensajes son muchos */
-    display: flex; /* Para centrar el mensaje inicial */
-    flex-direction: column; /* Apila los mensajes verticalmente */
-    justify-content: flex-start; /* Mensajes empiezan desde arriba */
+    
+    /* === INICIO: Modificaciones a regla existente === */
+    /* display: flex; Usar flexbox para centrar placeholder */
+    /* flex-direction: column; Apilar mensajes verticalmente */
+    /* === FIN: Modificaciones a regla existente === */
+    background-color: #e5ddd5; /* Fondo similar a WA */
+    /* background-image: url('../images/wa-background.png'); */ /* Opcional: patrón de fondo */
+    /* background-repeat: repeat; */
 }
+
+/* === INICIO: Reglas Nuevas === */
+/* Estilos cuando el placeholder está activo */
+.crm-chat-history-page .chat-messages-area.chat-placeholder-active {
+    display: flex; /* Usar flexbox SOLO para centrar placeholder */
+    flex-direction: column; /* Necesario con flex */
+    justify-content: center; /* Centrar verticalmente el placeholder */
+    align-items: center; /* Centrar horizontalmente el placeholder */
+    overflow: hidden; /* Ocultar scroll cuando está el placeholder (DEBE ESTAR ACTIVO) */
+}
+
+/* Contenedor del Placeholder */
+.crm-chat-history-page .chat-placeholder-container {
+    text-align: center;
+    /* max-width: 450px; */
+    color: #4a4a4a; /* Color de texto gris oscuro */
+    display: none; /* Oculto por defecto */
+}
+.crm-chat-history-page .chat-messages-area.chat-placeholder-active .chat-placeholder-container {
+    display: block; /* Mostrar solo cuando el área tiene la clase activa */
+}
+
+.crm-chat-history-page .chat-placeholder-image {
+    max-width: 250px;
+    margin-bottom: 20px;
+    opacity: 0.8;
+}
+
+.crm-chat-history-page .chat-placeholder-title {
+    font-size: 1.8em;
+    margin-bottom: 10px;
+    font-weight: 300; /* Fuente más ligera */
+    color: #525252;
+}
+
+.crm-chat-history-page .chat-placeholder-text {
+    font-size: 0.9em;
+    line-height: 1.5;
+    color: #666;
+}
+/* === FIN: Reglas Nuevas === */
+
 
 .crm-chat-history-page .no-chat-selected { /* Estilo para el mensaje inicial */
     color: #50575e;
@@ -402,6 +453,7 @@
     padding: 10px 15px;
     background-color: #f0f0f1; /* Fondo gris claro */
     border-top: 1px solid #dcdcdc;
+    flex-shrink: 0;
 }
 
 .crm-chat-history-page .chat-input-area .btn-attach {
@@ -496,4 +548,82 @@
     font-size: 1.2em;
     padding: 0 5px;
     margin-left: 10px;
+}
+
+/* ==========================================================================
+   ESTILOS para Columna Detalles del Contacto
+   ========================================================================== */
+
+.crm-chat-history-page .contact-details-column {
+    flex: 0 0 300px; /* No crece, no encoge, base de 300px */
+    border-left: 1px solid #ccd0d4; /* Separador izquierdo */
+    background-color: #fff; /* Fondo blanco */
+    display: flex; /* Usa flex para header y content */
+    flex-direction: column; /* Apila header y content */
+    overflow: hidden; /* Evita desbordamientos internos */
+    /* --- Animación --- */
+    /* display: none; se controla con JS/inline style */
+}
+
+
+/* Estado visible para la animación */
+/* .is-visible ya no se usa */
+
+.crm-chat-history-page .contact-details-header {
+    padding: 10px 15px;
+    padding-right: 40px; /* Espacio para el botón cerrar */
+    border-bottom: 1px solid #ccd0d4;
+    background-color: #f0f0f1; /* Fondo ligeramente gris */
+    flex-shrink: 0; /* Evita que el header se encoja */
+    position: relative; /* Para posicionar el botón cerrar */
+    display: flex; /* Para alinear título y botón si es necesario */
+    align-items: center; /* Centrar verticalmente */
+    justify-content: space-between; /* Poner título a la izq, botón a la der */
+}
+
+.crm-chat-history-page .contact-details-header h3 {
+    margin: 0;
+    font-size: 1.1em;
+    font-weight: 600; /* Un poco más de peso */
+}
+
+/* Estilo para el botón de cerrar */
+.crm-chat-history-page .contact-details-header #close-contact-details {
+    position: absolute; /* Posición absoluta respecto al header */
+    top: 50%;
+    right: 10px;
+    transform: translateY(-50%); /* Centrar verticalmente */
+    padding: 5px;
+    cursor: pointer;
+    background: none;
+    border: none;
+    color: #50575e; /* Color gris oscuro de WP */
+}
+.crm-chat-history-page .contact-details-header #close-contact-details:hover {
+    color: #d63638; /* Rojo al pasar el mouse */
+}
+
+.crm-chat-history-page .contact-details-content {
+    flex-grow: 1; /* Ocupa el espacio restante */
+    overflow-y: auto; /* Scroll si el contenido es largo */
+    padding: 15px;
+    line-height: 1.6; /* Mejorar legibilidad */
+}
+
+/* Placeholder para futuros campos de formulario */
+.crm-chat-history-page .contact-details-content .form-field {
+    margin-bottom: 15px;
+}
+.crm-chat-history-page .contact-details-content .form-field label {
+    display: block;
+    font-weight: 600;
+    margin-bottom: 5px;
+}
+.crm-chat-history-page .contact-details-content .form-field input[type="text"],
+.crm-chat-history-page .contact-details-content .form-field input[type="email"],
+.crm-chat-history-page .contact-details-content .form-field textarea {
+    width: 100%;
+    padding: 8px;
+    border: 1px solid #ccd0d4;
+    box-sizing: border-box; /* Incluir padding y borde en el ancho */
 }

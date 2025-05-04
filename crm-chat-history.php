@@ -36,8 +36,14 @@ function crm_evolution_sender_chat_history_page_html() {
                 </div>
             </div>
             <div id="chat-view-column" class="chat-view-column"> <!-- Cambiado ID para claridad -->
-                <div id="chat-messages-area" class="chat-messages-area">
-                    <p class="no-chat-selected"><?php esc_html_e( 'Selecciona un chat para ver los mensajes.', CRM_EVOLUTION_SENDER_TEXT_DOMAIN ); ?></p>
+                <div id="chat-messages-area" class="chat-messages-area chat-placeholder-active"> <?php // Añadir clase inicial ?>
+                    <!-- === INICIO: Placeholder WhatsApp Style === -->
+                    <div class="chat-placeholder-container">
+                        <img src="<?php echo esc_url( CRM_EVOLUTION_SENDER_PLUGIN_URL . 'assets/images/whatsapp-placeholder.png' ); ?>" alt="<?php esc_attr_e('Mantén tu teléfono conectado', CRM_EVOLUTION_SENDER_TEXT_DOMAIN); ?>" class="chat-placeholder-image">
+                        <h2 class="chat-placeholder-title"><?php esc_html_e('Mantén tu teléfono conectado', CRM_EVOLUTION_SENDER_TEXT_DOMAIN); ?></h2>
+                        <p class="chat-placeholder-text"><?php esc_html_e('WhatsApp se conecta a tu teléfono para sincronizar los mensajes. Para reducir el uso de datos, conecta tu teléfono a una red Wi-Fi.', CRM_EVOLUTION_SENDER_TEXT_DOMAIN); ?></p>
+                    </div>
+                    <!-- <p class="no-chat-selected"><?php esc_html_e( 'Selecciona un chat para ver los mensajes.', CRM_EVOLUTION_SENDER_TEXT_DOMAIN ); ?></p> -->
                     <!-- Aquí se cargarán los mensajes -->
                 </div>
                 <div id="chat-input-area" class="chat-input-area" style="display: none;"> <!-- Oculto inicialmente -->
@@ -92,6 +98,20 @@ function crm_evolution_sender_chat_history_page_html() {
                     <button id="send-chat-message" class="button button-primary btn-send" title="Enviar Mensaje"><span class="dashicons dashicons-arrow-right-alt"></span></button> <?php // <-- ID CORREGIDO ?>
                 </div>
             </div>
+            <!-- === INICIO: Nueva Columna para Detalles del Contacto === -->
+            <div id="contact-details-column" class="contact-details-column" style="display: none;">
+                <div class="contact-details-header">
+                    <h3><?php esc_html_e( 'Detalles del Contacto', CRM_EVOLUTION_SENDER_TEXT_DOMAIN ); ?></h3>
+                    <!-- === INICIO: Botón Cerrar Sidebar === -->
+                    <button id="close-contact-details" class="button-icon" title="<?php esc_attr_e( 'Cerrar detalles', CRM_EVOLUTION_SENDER_TEXT_DOMAIN ); ?>"><span class="dashicons dashicons-no-alt"></span></button>
+                    <!-- === FIN: Botón Cerrar Sidebar === -->
+                </div>
+                <div id="contact-details-content" class="contact-details-content">
+                    <p><?php esc_html_e( 'Cargando detalles...', CRM_EVOLUTION_SENDER_TEXT_DOMAIN ); ?></p>
+                    <!-- Aquí se cargarán los campos del contacto vía AJAX -->
+                </div>
+            </div>
+            <!-- === FIN: Nueva Columna para Detalles del Contacto === -->
         </div>
 
     </div>
