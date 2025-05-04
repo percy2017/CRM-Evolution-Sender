@@ -186,7 +186,7 @@ function crm_evolution_sender_enqueue_assets( $hook ) {
     wp_enqueue_script(
         'crm-evolution-sender-appjs',
         CRM_EVOLUTION_SENDER_PLUGIN_URL . 'assets/app.js',
-        array('jquery',  'thickbox', 'sweetalert2-js', 'datatables-js', 'intl-tel-input-js'), // Dependencias
+        array('jquery', 'thickbox', 'sweetalert2-js', 'datatables-js', 'intl-tel-input-js'), // <-- Añadido 'wp-media'
         CRM_EVOLUTION_SENDER_VERSION,
         true // Cargar en el footer
     );
@@ -284,7 +284,9 @@ function crm_evolution_use_media_library_avatar( $args, $id_or_email ) {
             $args['url'] = $image_data[0]; // Reemplazar la URL por la de nuestra imagen
             $args['found_avatar'] = true; // Indicar que encontramos un avatar personalizado
             // Opcional: añadir una clase CSS
-            $args['class'] = array_merge( (array) $args['class'], array('crm-local-avatar') );
+            // $args['class'] = array_merge( (array) $args['class'], array('crm-local-avatar') ); // Anterior
+            // Verificar si 'class' existe antes de hacer merge
+            $args['class'] = array_merge( isset($args['class']) ? (array) $args['class'] : array(), array('crm-local-avatar') );
             crm_log("Usando avatar local (Attachment ID: {$attachment_id}) para usuario ID {$user_id}.", 'DEBUG');
         } else {
              crm_log("Se encontró Attachment ID {$attachment_id} para usuario {$user_id}, pero wp_get_attachment_image_src falló.", 'WARN');

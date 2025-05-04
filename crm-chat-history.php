@@ -19,13 +19,17 @@ function crm_evolution_sender_chat_history_page_html() {
     }
     ?>
     <div class="wrap crm-evolution-sender-wrap crm-chat-history-page">
-        <h1><span class="dashicons dashicons-format-chat" style="vertical-align: middle;"></span> <?php esc_html_e( 'Historial de Chats CRM', CRM_EVOLUTION_SENDER_TEXT_DOMAIN ); ?></h1>
+        <!-- <h1><span class="dashicons dashicons-format-chat" style="vertical-align: middle;"></span> <?php esc_html_e( 'Historial de Chats CRM', CRM_EVOLUTION_SENDER_TEXT_DOMAIN ); ?></h1> -->
 
         <div id="crm-chat-container" class="crm-chat-container">
             <div id="chat-list-column" class="chat-list-column">
                 <div class="chat-list-header">
-                    <h2><?php esc_html_e( 'Conversaciones', CRM_EVOLUTION_SENDER_TEXT_DOMAIN ); ?></h2>
-                    <!-- Aquí podría ir un campo de búsqueda -->
+                    <!-- <h2><?php esc_html_e( 'Conversaciones', CRM_EVOLUTION_SENDER_TEXT_DOMAIN ); ?></h2> -->
+                    <!-- Inicio: Campo de búsqueda -->
+                    <div class="chat-search-container">
+                        <input type="search" id="chat-search-input" placeholder="<?php esc_attr_e( 'Buscar o empezar un chat nuevo', CRM_EVOLUTION_SENDER_TEXT_DOMAIN ); ?>">
+                    </div>
+                    <!-- Fin: Campo de búsqueda -->
                 </div>
                 <div id="chat-list-items" class="chat-list-items">
                     <p><?php esc_html_e( 'Cargando conversaciones...', CRM_EVOLUTION_SENDER_TEXT_DOMAIN ); ?></p>
@@ -37,9 +41,55 @@ function crm_evolution_sender_chat_history_page_html() {
                     <!-- Aquí se cargarán los mensajes -->
                 </div>
                 <div id="chat-input-area" class="chat-input-area" style="display: none;"> <!-- Oculto inicialmente -->
+                    <!-- Contenedor del panel de emojis (inicialmente oculto) -->
+                    <div id="emoji-picker-container" class="emoji-picker-container" style="display: none;">
+
+                        <?php // --- Caras y Emociones --- ?>
+                        <span class="emoji-option">😊</span>
+                        <span class="emoji-option">😂</span>
+                        <span class="emoji-option">😍</span>
+                        <span class="emoji-option">🤔</span>
+                        <span class="emoji-option">😢</span>
+                        <span class="emoji-option">😮</span>
+                        <span class="emoji-option">😎</span>
+                        <span class="emoji-option">🥳</span>
+                        <span class="emoji-option">😭</span>
+                        <span class="emoji-option">😉</span>
+                        <span class="emoji-option">😋</span>
+                        <span class="emoji-option">😇</span>
+                        <span class="emoji-option">😅</span>
+                        <span class="emoji-option">😜</span>
+                        <span class="emoji-option">🙄</span>
+                        <span class="emoji-option">🤯</span>
+                        <?php // --- Gestos y Personas --- ?>
+                        <span class="emoji-option">👍</span>
+                        <span class="emoji-option">👎</span>
+                        <span class="emoji-option">🙏</span>
+                        <span class="emoji-option">👋</span>
+                        <span class="emoji-option">👌</span>
+                        <span class="emoji-option">🙌</span>
+                        <span class="emoji-option">🤷</span>
+                        <span class="emoji-option">👀</span>
+                        <?php // --- Símbolos y Objetos --- ?>
+                        <span class="emoji-option">❤️</span>
+                        <span class="emoji-option">🎉</span>
+                        <span class="emoji-option">🔥</span>
+                        <span class="emoji-option">✅</span>
+                        <span class="emoji-option">💰</span>
+                        <span class="emoji-option">✨</span>
+                        <span class="emoji-option">🚀</span>
+                        <span class="emoji-option">💡</span>
+                        <span class="emoji-option">💯</span>
+                        <span class="emoji-option">❓</span>
+                        <span class="emoji-option">❗</span>
+
+                    </div>
+                    <button id="emoji-picker-button" class="button button-secondary btn-emoji" title="Emojis"><span class="dashicons dashicons-smiley"></span></button> <?php // <-- Botón Emoji ?>
                     <button class="button button-secondary btn-attach" title="Adjuntar (Próximamente)"><span class="dashicons dashicons-paperclip"></span></button>
+                    <!-- Contenedor para la vista previa del adjunto -->
+                    <div id="chat-attachment-preview" class="chat-attachment-preview" style="display: none;"></div>
                     <textarea id="chat-message-input" placeholder="<?php esc_attr_e( 'Escribe un mensaje aquí...', CRM_EVOLUTION_SENDER_TEXT_DOMAIN ); ?>" rows="1"></textarea>
-                    <button id="send-message-button" class="button button-primary btn-send" title="Enviar Mensaje"><span class="dashicons dashicons-arrow-right-alt"></span></button>
+                    <button id="send-chat-message" class="button button-primary btn-send" title="Enviar Mensaje"><span class="dashicons dashicons-arrow-right-alt"></span></button> <?php // <-- ID CORREGIDO ?>
                 </div>
             </div>
         </div>

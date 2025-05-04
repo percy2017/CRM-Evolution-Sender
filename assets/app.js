@@ -1121,7 +1121,117 @@
         }
         // --- FIN: Lógica para Historial de Chats ---
         if ($('#crm-chat-container').length) initChatHeartbeat(); // <--- ¡Aquí está!
+        // --- INICIO: Lógica para Buscador de Chats ---
+        // ¡Llamar a la función para activar el buscador!
+        if ($('#crm-chat-container').length) {
+            crm_js_log('[BUSCADOR] Contenedor #crm-chat-container encontrado. Llamando a initChatSearchHandler().');
+            initChatSearchHandler();
+        } else {
+            crm_js_log('[BUSCADOR] Contenedor #crm-chat-container NO encontrado. initChatSearchHandler() NO se llamará.', 'WARN');
+        }
 
+
+        // *** FIN PRUEBA DEPURACIÓN GLOBAL DE CLICS ***
+
+        /**
+             * =========================================================================
+             * == BUSCADOR DE CHATS (Funciones) ==
+             * =========================================================================
+             */
+
+        let searchDebounceTimer; // Timer para debounce
+        const SEARCH_DEBOUNCE_DELAY = 300; // Milisegundos de espera antes de buscar
+        const MIN_SEARCH_LENGTH = 3; // Longitud mínima para buscar usuarios WP
+
+        /**
+         * Inicializa el manejador de eventos para el input de búsqueda de chats.
+         */
+        function initChatSearchHandler() {
+            const $ = jQuery;
+            const $searchInput = $('#chat-search-input');
+            const $chatListContainer = $('#chat-list-items');
+
+            if (!$searchInput.length || !$chatListContainer.length) {
+                crm_js_log('Input de búsqueda #chat-search-input o contenedor #chat-list-items no encontrado.', 'ERROR');
+                return;
+            }
+            $searchInput.on('input', function() {
+                crm_js_log('[BUSCADOR] Evento input detectado.'); // <-- LOG 1
+
+                clearTimeout(searchDebounceTimer); // Cancelar timer anterior
+
+                searchDebounceTimer = setTimeout(() => {
+                    const searchTerm = $(this).val().trim().toLowerCase();
+                    crm_js_log(`Buscando chats/usuarios: "${searchTerm}"`);
+
+                    // 1. Limpiar resultados de búsqueda de WP anteriores
+                    $chatListContainer.find('.wp-user-search-result, .wp-user-search-loading, .wp-user-search-no-results, .wp-user-search-error').remove(); // Limpiar todo lo relacionado a búsqueda WP
+
+                    // 2. Decidir si buscar vía AJAX o mostrar lista original
+                    if (searchTerm.length >= MIN_SEARCH_LENGTH) {
+                        // Ocultar la lista original y buscar en WP
+                        crm_js_log(`[BUSCADOR] Término >= ${MIN_SEARCH_LENGTH}. Ocultando lista original y buscando usuarios WP...`);
+                        $chatListContainer.find('.chat-list-item:not(.wp-user-search-result)').hide(); // Ocultar originales
+                        searchWpUsersForChat(searchTerm, $chatListContainer);
+                    } else if (searchTerm === '') {
+                        // Si se borró la búsqueda, mostrar todos los chats originales
+                        crm_js_log('[BUSCADOR] Término vacío. Mostrando lista original.');
+                        $chatListContainer.find('.chat-list-item:not(.wp-user-search-result)').show();
+                    } else {
+                        // Si el término es corto (1 o 2 caracteres), simplemente mostrar la lista original
+                        crm_js_log(`[BUSCADOR] Término corto (< ${MIN_SEARCH_LENGTH}). Mostrando lista original.`);
+                        $chatListContainer.find('.chat-list-item:not(.wp-user-search-result)').show();
+
+                    }
+
+                }, SEARCH_DEBOUNCE_DELAY);
+            });
+        }
+
+        /**
+         * Realiza la búsqueda AJAX de usuarios WP y muestra los resultados.
+         * @param {string} searchTerm El término de búsqueda.
+         * @param {jQuery} container El contenedor donde mostrar los resultados.
+         */
+        function searchWpUsersForChat(searchTerm, container) {
+            const $ = jQuery;
+            // Mostrar un indicador de carga específico para la búsqueda de usuarios
+            container.append('<p class="wp-user-search-loading"><span class="spinner is-active" style="float: none; vertical-align: middle;"></span> Buscando usuarios...</p>');
+
+            performAjaxRequest(
+                'crm_search_wp_users_for_chat',
+                { search_term: searchTerm },
+                function(users) { // onSuccess
+                    container.find('.wp-user-search-loading').remove(); // Quitar indicador
+                    if (users && users.length > 0) {
+                        crm_js_log(`Usuarios WP encontrados: ${users.length}`, 'INFO', users);
+                        users.forEach(user => {
+                            // Crear HTML para el resultado de usuario WP
+                            // TODO: Añadir un botón/enlace para "Iniciar Chat" que llame a una función futura
+                            const userHtml = `
+                                <div class="chat-list-item wp-user-search-result" data-wp-user-id="${user.user_id}">
+                                    <img src="${user.avatar_url}" alt="${escapeHtml(user.display_name)}" class="chat-avatar">
+                                    <div class="chat-item-details">
+                                        <span class="chat-item-name">${escapeHtml(user.display_name)}</span>
+                                        <span class="chat-item-snippet wp-user-label">Usuario de WordPress</span>
+                                        <!-- <button class="button button-small start-chat-wp-user">Iniciar Chat</button> -->
+                                    </div>
+                                </div>`;
+                            container.append(userHtml);
+                        });
+                        // TODO: Añadir handler para el botón "Iniciar Chat" si se implementa
+                    } else {
+                        crm_js_log('No se encontraron usuarios WP para iniciar chat.', 'INFO');
+                        container.append('<p class="wp-user-search-no-results">No se encontraron usuarios de WordPress con teléfono que coincidan.</p>');
+                    }
+                },
+                function(errorResponse) { // onError
+                    container.find('.wp-user-search-loading').remove(); // Quitar indicador
+                    container.append('<p class="wp-user-search-error error-message">Error al buscar usuarios.</p>');
+                    // El error ya se muestra como notificación por performAjaxRequest
+                }
+            );
+        }
 
         crm_js_log('Script del plugin CRM Evolution Sender inicializado completamente.');
     }); // Fin de $(document).ready
@@ -1201,11 +1311,18 @@
         const $ = jQuery;
         // Usar .off().on() para evitar múltiples bindings si se llama varias veces
         $('#chat-list-items').off('click', '.chat-list-item').on('click', '.chat-list-item', function() {
-            const userId = $(this).data('user-id');
-            crm_js_log(`Click en chat item. User ID: ${userId}`);
+            const $clickedItem = $(this); // Guardar referencia al item clickeado
+            let userId = $clickedItem.data('user-id'); // Intentar obtener de data-user-id (chats existentes)
+
+            // Si no se encontró en data-user-id, intentar con data-wp-user-id (resultados búsqueda WP)
+            if (typeof userId === 'undefined' || userId === null) {
+                userId = $clickedItem.data('wp-user-id');
+            }
+
+            crm_js_log(`Click en chat list item. Intentando obtener User ID. Encontrado: ${userId} (Tipo: ${typeof userId})`); // <-- LOG DE VERIFICACIÓN
 
             // Marcar como activo
-            $('#chat-list-items .chat-list-item').removeClass('active');
+            $('#chat-list-items .chat-list-item.active').removeClass('active'); // Quitar clase solo al activo
             $(this).addClass('active');
 
             // Cargar mensajes
@@ -1217,6 +1334,7 @@
             $('#chat-input-area').show();
         });
     }
+
     /**
      * Carga los mensajes para una conversación específica vía AJAX.
      * @param {number} userId El ID del usuario WP cuya conversación cargar.
@@ -1279,7 +1397,7 @@
                         }
 
                         const messageHtml = `
-                            <div class="${messageClass}">
+                            <div class="${messageClass}" data-msg-id="${msg.id}">
                                 <div class="message-bubble">
                                     ${messageContentHtml}
                                     <div class="message-time">${timeString}</div>
@@ -1298,6 +1416,194 @@
                     lastDisplayedMessageTimestamp = latestTimestampInBatch; // <-- Guardar timestamp del último mensaje mostrado
                     messagesContainer.scrollTop(messagesContainer[0].scrollHeight);
 
+                    // *** INICIO: Adjuntar listeners AHORA ***
+                    crm_js_log('[loadConversationMessages] Adjuntando listeners...');
+                    const $sendButton = $('#send-chat-message');
+                    const $messageInput = $('#chat-message-input');
+                    const $emojiButton = $('#emoji-picker-button');
+                    const $emojiContainer = $('#emoji-picker-container');
+                    const $attachButton = $('.btn-attach');
+                    const $previewContainer = $('#chat-attachment-preview');
+
+                    // Variable para almacenar la info del adjunto actual (accesible por attach y remove)
+                    let currentAttachment = null;
+
+                    if ($sendButton.length && $messageInput.length) {
+                        // Listener para el botón de enviar
+                        $sendButton.off('click.sendMessage').on('click.sendMessage', function() {
+                            crm_js_log('[ENVIO] Botón Enviar Mensaje clickeado (directo).');
+                            const messageText = $messageInput.val().trim();
+                            const recipientUserId = currentOpenChatUserId;
+                            crm_js_log(`[ENVIO] Texto: "${messageText}", UserID: ${recipientUserId}, Adjunto:`, 'DEBUG', currentAttachment); // Log modificado
+
+                            // Validar que haya un destinatario
+                            if (!recipientUserId) {
+                                crm_js_log('[ENVIO] Validación fallida: No hay chat activo.', 'ERROR');
+                                showNotification('Error', 'error', 'No hay una conversación seleccionada.');
+                                return;
+                            }
+
+                            // --- INICIO: Lógica de Envío Modificada ---
+                            if (currentAttachment) { // Si hay un adjunto
+                                crm_js_log(`[ENVIO] Intentando enviar adjunto a User ID: ${recipientUserId}`, 'INFO', currentAttachment);
+                                $sendButton.prop('disabled', true);
+                                crm_js_log('[ENVIO] Llamando a performAjaxRequest para crm_send_media_message_ajax...');
+
+                                performAjaxRequest(
+                                    'crm_send_media_message_ajax', // Nueva acción PHP para media
+                                    {
+                                        user_id: recipientUserId,
+                                        attachment_url: currentAttachment.url,
+                                        mime_type: currentAttachment.mime,
+                                        filename: currentAttachment.filename,
+                                        caption: messageText // Usar el texto como caption
+                                    },
+                                    function(response) { // onSuccess
+                                        crm_js_log('[ENVIO-MEDIA] AJAX onSuccess ejecutado.', 'INFO', response);
+                                        // Limpiar preview y datos
+                                        currentAttachment = null;
+                                        $previewContainer.empty().hide();
+                                        $messageInput.val(''); // Limpiar caption
+                                        // TODO: Actualización optimista para media? (Más complejo)
+                                    }
+                                ).always(function() {
+                                    crm_js_log('[ENVIO-MEDIA] AJAX always ejecutado. Habilitando botón.');
+                                    $sendButton.prop('disabled', false);
+                                });
+
+                            } else if (messageText) { // Si NO hay adjunto pero SÍ hay texto
+                                crm_js_log(`[ENVIO] Intentando enviar texto a User ID: ${recipientUserId}`, 'INFO', { text: messageText });
+                                $sendButton.prop('disabled', true);
+                                crm_js_log('[ENVIO] Llamando a performAjaxRequest para crm_send_message_ajax...');
+
+                                performAjaxRequest(
+                                    'crm_send_message_ajax',
+                                    { user_id: recipientUserId, message_text: messageText },
+                                    function(response) { // onSuccess
+                                        crm_js_log('[ENVIO-TEXTO] AJAX onSuccess ejecutado.', 'INFO', response);
+                                        // Actualización Optimista para texto
+                                        const nowTimestamp = Math.floor(Date.now() / 1000);
+                                        const messageData = {
+                                            id: 'temp_' + nowTimestamp, text: messageText, timestamp: nowTimestamp, is_outgoing: true, type: 'text'
+                                        };
+                                        const timeStringOptimistic = new Date(messageData.timestamp * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                                        const messageHtml = `
+                                            <div class="chat-message outgoing" data-msg-id="${messageData.id}">
+                                                <div class="message-bubble">
+                                                    <div class="message-text">${escapeHtml(messageData.text)}</div>
+                                                    <div class="message-time">${timeStringOptimistic}</div>
+                                                </div>
+                                            </div>
+                                        `;
+                                        $('#chat-messages-area').append(messageHtml);
+                                        $('#chat-messages-area').scrollTop($('#chat-messages-area')[0].scrollHeight);
+                                        $messageInput.val('');
+                                    }
+                                ).always(function() {
+                                    crm_js_log('[ENVIO-TEXTO] AJAX always ejecutado. Habilitando botón.');
+                                    $sendButton.prop('disabled', false);
+                                });
+
+                            } else { // Ni adjunto ni texto
+                                crm_js_log('[ENVIO] Validación fallida: Mensaje vacío y sin adjunto.', 'WARN');
+                                showNotification('Mensaje Vacío', 'warning', 'Escribe un mensaje o adjunta un archivo.');
+                            }
+                            // --- FIN: Lógica de Envío Modificada ---
+                        });
+
+                        // Listener para Enter en el input
+                        $messageInput.off('keydown.sendMessage').on('keydown.sendMessage', function(event) {
+                            if (event.key === 'Enter' && !event.shiftKey) {
+                                event.preventDefault();
+                                crm_js_log('[ENVIO] Enter presionado en input. Simulando clic.');
+                                $sendButton.click(); // Simular clic
+                            }
+                        });
+
+                        // Listener para el botón de Emojis
+                        if ($emojiButton.length && $emojiContainer.length) {
+                            $emojiButton.off('click.toggleEmoji').on('click.toggleEmoji', function(event) {
+                                if (event.target !== this && !$(event.target).closest(this).is(this)) return;
+                                crm_js_log('Clic DIRECTO en Botón Emoji. Toggle panel.');
+                                $emojiContainer.slideToggle(150);
+                            });
+                            // Listener para hacer clic en un emoji DENTRO del panel
+                            $emojiContainer.off('click.selectEmoji').on('click.selectEmoji', '.emoji-option', function(event) { // Añadido event
+                                crm_js_log('[EMOJI-CLICK] Clic detectado en .emoji-option. Elemento:', this);
+                                const $emojiImg = $(this).find('img.emoji');
+                                const emoji = $emojiImg.length ? $emojiImg.attr('alt') : null;
+                                crm_js_log('[EMOJI-CLICK] Emoji obtenido del alt de la imagen:', emoji);
+                                if (!emoji) {
+                                    crm_js_log('[EMOJI-CLICK] No se pudo obtener el emoji del atributo alt.', 'WARN');
+                                    return false;
+                                }
+                                crm_js_log(`Emoji seleccionado: ${emoji}`);
+                                const input = $messageInput[0];
+                                const start = input.selectionStart;
+                                const end = input.selectionEnd;
+                                const text = $messageInput.val();
+                                $messageInput.val(text.substring(0, start) + emoji + text.substring(end));
+                                input.selectionStart = input.selectionEnd = start + emoji.length;
+                                input.focus();
+                                $emojiContainer.slideUp(150);
+                                return false; // Mantener return false
+                            });
+                        } else {
+                            crm_js_log('[loadConversationMessages] Error: No se encontró #emoji-picker-button o #emoji-picker-container.', 'WARN');
+                        }
+
+                        // Listener para el botón de Adjuntar Media
+                        if ($attachButton.length) {
+                            let mediaFrame;
+                            $attachButton.off('click.attachMedia').on('click.attachMedia', function(event) {
+                                event.preventDefault();
+                                crm_js_log('Botón Adjuntar Media clickeado.');
+                                if (mediaFrame) {
+                                    mediaFrame.open();
+                                    return;
+                                }
+                                mediaFrame = wp.media({
+                                    title: 'Seleccionar o Subir Multimedia para Chat',
+                                    button: { text: 'Adjuntar al chat' },
+                                    multiple: false
+                                });
+                                mediaFrame.on('select', function() {
+                                    const attachment = mediaFrame.state().get('selection').first().toJSON();
+                                    crm_js_log('Archivo multimedia seleccionado para chat:', 'DEBUG', attachment);
+                                    currentAttachment = { // Guardar en la variable de ámbito superior
+                                        url: attachment.url,
+                                        filename: attachment.filename || attachment.url.split('/').pop(),
+                                        mime: attachment.mime,
+                                        id: attachment.id
+                                    };
+                                    crm_js_log('Adjunto actual almacenado:', 'DEBUG', currentAttachment);
+                                    renderAttachmentPreview(currentAttachment, $previewContainer);
+                                    $messageInput.focus(); // Poner foco en el input para escribir caption
+                                });
+                                mediaFrame.open();
+                            });
+                        } else {
+                            crm_js_log('[loadConversationMessages] Error: No se encontró .btn-attach.', 'WARN');
+                        }
+
+                        // Listener para quitar el adjunto (delegado al contenedor de preview)
+                        if ($previewContainer.length) {
+                            $previewContainer.off('click.removeAttachment').on('click.removeAttachment', '.remove-attachment', function(event) {
+                                event.preventDefault();
+                                crm_js_log('Quitar adjunto clickeado.');
+                                currentAttachment = null; // Limpiar datos almacenados
+                                $previewContainer.empty().hide(); // Limpiar y ocultar vista previa
+                                crm_js_log('Adjunto quitado.');
+                            });
+                        }
+
+                        crm_js_log('[loadConversationMessages] Listeners adjuntados.');
+
+                    } else {
+                        crm_js_log('[loadConversationMessages] Error: No se encontró #send-chat-message o #chat-message-input después de cargar mensajes.', 'ERROR');
+                    }
+                    // *** FIN: Adjuntar listeners AHORA ***
+
                 } else if (response.success && response.data.length === 0) {
                     messagesContainer.html('<p class="no-messages">No hay mensajes en esta conversación.</p>');
                 } else {
@@ -1310,6 +1616,49 @@
                 messagesContainer.html('<p class="error-message">Error de conexión al cargar mensajes.</p>');
             }
         });
+    }
+
+
+    /**
+     * Renderiza la vista previa de un archivo adjunto.
+     * @param {object|null} attachment Objeto con datos del adjunto (url, filename, mime) o null para limpiar.
+     * @param {jQuery} $previewContainer Contenedor jQuery donde mostrar la preview.
+     */
+    function renderAttachmentPreview(attachment, $previewContainer) {
+        let previewHtml = '';
+
+        if (!attachment) {
+            $previewContainer.empty().hide();
+            return;
+        }
+
+        // Crear HTML basado en el tipo MIME
+        if (attachment.mime.startsWith('image/')) {
+            previewHtml = `
+                <img src="${escapeHtml(attachment.url)}" alt="Vista previa">
+                <span class="attachment-info">${escapeHtml(attachment.filename)}</span>
+            `;
+        } else if (attachment.mime.startsWith('video/')) {
+            previewHtml = `
+                <span class="dashicons dashicons-format-video"></span>
+                <span class="attachment-info">${escapeHtml(attachment.filename)}</span>
+            `;
+        } else if (attachment.mime.startsWith('audio/')) {
+             previewHtml = `
+                <span class="dashicons dashicons-format-audio"></span>
+                <span class="attachment-info">${escapeHtml(attachment.filename)}</span>
+            `;
+        } else { // Documento u otro
+            previewHtml = `
+                <span class="dashicons dashicons-media-default"></span>
+                <span class="attachment-info">${escapeHtml(attachment.filename)}</span>
+            `;
+        }
+
+        // Añadir botón de quitar
+        previewHtml += `<button class="remove-attachment" title="Quitar adjunto">&times;</button>`;
+
+        $previewContainer.html(previewHtml).show();
     }
 
     /**
