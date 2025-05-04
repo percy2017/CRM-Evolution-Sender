@@ -429,6 +429,28 @@ function crm_find_or_create_user_with_avatar($remoteJid, $senderJid, $pushName, 
 function crm_save_chat_message( $message_data ) {
     crm_log( 'Iniciando crm_save_chat_message con datos:', 'DEBUG', $message_data );
 
+    // --- INICIO: Comprobación de Duplicados ---
+    if ( ! empty( $message_data['whatsapp_message_id'] ) ) {
+        $args = array(
+            'post_type' => 'crm_chat',
+            'post_status' => 'any', // Buscar en cualquier estado
+            'posts_per_page' => 1,
+            'meta_query' => array(
+                array(
+                    'key' => '_crm_message_id_wa',
+                    'value' => sanitize_text_field( $message_data['whatsapp_message_id'] ),
+                ),
+            ),
+            'fields' => 'ids', // Solo necesitamos saber si existe
+        );
+        $existing_posts = get_posts( $args );
+        if ( ! empty( $existing_posts ) ) {
+            crm_log( "Mensaje duplicado detectado para WA ID {$message_data['whatsapp_message_id']}. No se guardará.", 'INFO' );
+            return $existing_posts[0]; // Devolver el ID del post existente podría ser útil
+        }
+    }
+    // --- FIN: Comprobación de Duplicados ---
+
     $attachment_id = null;
 
     // 1. Procesar archivo adjunto si existe

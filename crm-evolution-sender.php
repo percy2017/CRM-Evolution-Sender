@@ -30,6 +30,7 @@ require_once CRM_EVOLUTION_SENDER_PLUGIN_DIR . 'crm-setting.php';
 require_once CRM_EVOLUTION_SENDER_PLUGIN_DIR . 'crm-ajax-handlers.php';
 require_once CRM_EVOLUTION_SENDER_PLUGIN_DIR . 'crm-rest-api.php';
 require_once CRM_EVOLUTION_SENDER_PLUGIN_DIR . 'crm-cpt-chat.php';
+require_once CRM_EVOLUTION_SENDER_PLUGIN_DIR . 'crm-cpt-campaign.php';
 require_once CRM_EVOLUTION_SENDER_PLUGIN_DIR . 'crm-chat-history.php';
 
 
@@ -69,7 +70,15 @@ function crm_evolution_sender_admin_menu() {
         'dashicons-whatsapp', // Icono (WhatsApp)
         25 // Posición
     );
-
+    // --- Submenú para Historial de Chats Estilo WhatsApp ---
+    add_submenu_page(
+        'crm-evolution-sender-main',                     // Slug del menú padre
+        __( 'Conversaciones', CRM_EVOLUTION_SENDER_TEXT_DOMAIN ), // Título de la página
+        __( 'Conversaciones', CRM_EVOLUTION_SENDER_TEXT_DOMAIN ),       // Título del submenú
+        'edit_posts',                                    // Capacidad requerida (ver chats)
+        'crm-evolution-chat-history',                    // Slug de este submenú
+        'crm_evolution_sender_chat_history_page_html'    // Función que muestra el contenido (de crm-chat-history.php)
+    );
     // Página de Ajustes (como submenú)
     add_submenu_page(
         'crm-evolution-sender-main', // Slug del menú padre
@@ -80,23 +89,15 @@ function crm_evolution_sender_admin_menu() {
         'crm_evolution_sender_settings_page_html' // Función que muestra el contenido
     );
     // Añadir submenú para listar los Chats CRM (CPT)
-    add_submenu_page(
-        'crm-evolution-sender-main',                     // Slug del menú padre
-        __( 'Historial de Chats', CRM_EVOLUTION_SENDER_TEXT_DOMAIN ), // Título de la página
-        __( 'Chats CRM', CRM_EVOLUTION_SENDER_TEXT_DOMAIN ),          // Título del submenú
-        'edit_posts',                                    // Capacidad requerida para ver posts
-        'edit.php?post_type=crm_chat',                   // Slug: URL directa a la lista del CPT
-        null                                             // No necesita función de callback, WP maneja edit.php
-    );
-    // --- Submenú para Historial de Chats Estilo WhatsApp ---
-    add_submenu_page(
-        'crm-evolution-sender-main',                     // Slug del menú padre
-        __( 'Historial de Chats CRM', CRM_EVOLUTION_SENDER_TEXT_DOMAIN ), // Título de la página
-        __( 'Historial Chats', CRM_EVOLUTION_SENDER_TEXT_DOMAIN ),       // Título del submenú
-        'edit_posts',                                    // Capacidad requerida (ver chats)
-        'crm-evolution-chat-history',                    // Slug de este submenú
-        'crm_evolution_sender_chat_history_page_html'    // Función que muestra el contenido (de crm-chat-history.php)
-    );
+    // add_submenu_page(
+    //     'crm-evolution-sender-main',                     // Slug del menú padre
+    //     __( 'Historial de Chats', CRM_EVOLUTION_SENDER_TEXT_DOMAIN ), // Título de la página
+    //     __( 'Chats CRM', CRM_EVOLUTION_SENDER_TEXT_DOMAIN ),          // Título del submenú
+    //     'edit_posts',                                    // Capacidad requerida para ver posts
+    //     'edit.php?post_type=crm_chat',                   // Slug: URL directa a la lista del CPT
+    //     null                                             // No necesita función de callback, WP maneja edit.php
+    // );
+
     
     
 }
@@ -205,6 +206,40 @@ function crm_evolution_sender_enqueue_assets( $hook ) {
 }
 add_action( 'admin_enqueue_scripts', 'crm_evolution_sender_enqueue_assets' );
 
+/**
+ * Encola los scripts y estilos específicos para la pantalla de edición del CPT Campañas.
+ *
+ * @param string $hook_suffix El hook de la página actual.
+ */
+function crm_enqueue_campaign_edit_assets( $hook_suffix ) {
+    // Comprobar si estamos en la página de edición (post.php) o creación (post-new.php)
+    if ( 'post.php' === $hook_suffix || 'post-new.php' === $hook_suffix ) {
+        // Obtener el tipo de post actual de forma segura
+        $current_post_type = get_current_screen()->post_type ?? null;
+
+        // Encolar solo si es nuestro CPT de campañas
+        if ( 'crm_sender_campaign' === $current_post_type ) {
+            // Encolar el CSS específico
+            wp_enqueue_style(
+                'crm-admin-campaign-styles',
+                CRM_EVOLUTION_SENDER_PLUGIN_URL . 'assets/admin-campaign.css',
+                array(),
+                CRM_EVOLUTION_SENDER_VERSION
+            );
+            // Encolar la biblioteca de medios de WP
+            wp_enqueue_media();
+            // Encolar el JS específico
+            wp_enqueue_script(
+                'crm-admin-campaign-js',
+                CRM_EVOLUTION_SENDER_PLUGIN_URL . 'assets/admin-campaign.js',
+                array('jquery'), // Dependencias
+                CRM_EVOLUTION_SENDER_VERSION,
+                true // Cargar en el footer
+            );
+        }
+    }
+}
+add_action( 'admin_enqueue_scripts', 'crm_enqueue_campaign_edit_assets' );
 
 /**
  * Añade un enlace de "Ajustes" en la lista de plugins.
@@ -287,7 +322,7 @@ function crm_evolution_use_media_library_avatar( $args, $id_or_email ) {
             // $args['class'] = array_merge( (array) $args['class'], array('crm-local-avatar') ); // Anterior
             // Verificar si 'class' existe antes de hacer merge
             $args['class'] = array_merge( isset($args['class']) ? (array) $args['class'] : array(), array('crm-local-avatar') );
-            crm_log("Usando avatar local (Attachment ID: {$attachment_id}) para usuario ID {$user_id}.", 'DEBUG');
+            // crm_log("Usando avatar local (Attachment ID: {$attachment_id}) para usuario ID {$user_id}.", 'DEBUG');
         } else {
              crm_log("Se encontró Attachment ID {$attachment_id} para usuario {$user_id}, pero wp_get_attachment_image_src falló.", 'WARN');
         }

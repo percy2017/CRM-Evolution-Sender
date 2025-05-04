@@ -188,98 +188,7 @@
     }
 
 
-    /**
-    * Inicializa la DataTable para la tabla de Usuarios WP.
-    */
-    function initUsersTable() {
-        crm_js_log('Inicializando DataTable para Usuarios WP.');
-         if ($('#users-table').length === 0) {
-            crm_js_log('Tabla #users-table no encontrada en el DOM.', 'WARN');
-            return;
-        }
-        if (usersTable) {
-             crm_js_log('DataTable de Usuarios ya inicializada. Refrescando datos...');
-            usersTable.ajax.reload();
-            return;
-        }
-
-        usersTable = $('#users-table').DataTable({
-            processing: true,
-            serverSide: false, // Podría ser true si hay muchos usuarios
-             ajax: {
-                url: crm_evolution_sender_params.ajax_url,
-                type: 'POST',
-                data: {
-                    action: 'crm_get_wp_users',
-                    _ajax_nonce: crm_evolution_sender_params.nonce
-                },
-                 dataSrc: function(json) {
-                    console.log(json)
-                    if (!json || !json.success || !Array.isArray(json.data)) {
-                        crm_js_log('Error o formato inesperado en la respuesta AJAX para get_wp_users.', 'ERROR', json);
-                        showNotification('Error al cargar usuarios.', 'error');
-                        return [];
-                    }
-                    crm_js_log('Datos de usuarios WP recibidos:', json.data);
-                    return json.data;
-                },
-                error: function(xhr, status, error) {
-                    crm_js_log('Error AJAX al obtener usuarios WP.', 'ERROR', { status: status, error: error, response: xhr.responseText });
-                    showNotification('Error de conexión al cargar usuarios.', 'error');
-                }
-            },
-            columns: [
-                { data: 'id' },
-                { data: 'user_login' },
-                { data: 'etiqueta', defaultContent: '<i>N/A</i>' },
-                { data: 'display_name' },
-                { data: 'user_email' },
-                { data: 'roles', render: function(data, type, row){ return Array.isArray(data) ? data.join(', ') : data; } }, // Mostrar roles
-                { data: 'phone', defaultContent: '<i>N/D</i>' } // Asumiendo que 'phone' viene del backend
-            ],
-             language: dataTablesLang,
-             // Habilitar selección de filas con checkboxes
-             select: {
-                style: 'multi', // Permitir selección múltiple
-                selector: 'td:first-child input[type="checkbox"]' // Selector para activar selección
-             },
-             order: [[1, 'asc']] // Ordenar por ID por defecto
-        });
-
-        // Evento para el checkbox "seleccionar todos"
-        $('#select-all-users').on('change', function() {
-            let isChecked = $(this).prop('checked');
-            $('.user-select-checkbox').prop('checked', isChecked).trigger('change'); // Marcar/desmarcar todos y disparar change
-             if (isChecked) {
-                usersTable.rows().select();
-            } else {
-                usersTable.rows().deselect();
-            }
-        });
-
-        // Actualizar estado del botón de acción al cambiar selección
-        usersTable.on('select deselect', function () {
-            updateUserActionButtonState();
-        });
-         // También manejar el cambio directo en checkboxes individuales
-        $('#users-table tbody').on('change', '.user-select-checkbox', function() {
-             // Sincronizar la selección de DataTables con el estado del checkbox
-            let row = usersTable.row($(this).closest('tr'));
-            if ($(this).prop('checked')) {
-                row.select();
-            } else {
-                row.deselect();
-            }
-            // Actualizar el checkbox "seleccionar todos" si es necesario
-            let allChecked = $('.user-select-checkbox:checked').length === usersTable.rows().count();
-            let someChecked = $('.user-select-checkbox:checked').length > 0;
-            $('#select-all-users').prop('checked', allChecked);
-            $('#select-all-users').prop('indeterminate', !allChecked && someChecked); // Estado intermedio
-
-            updateUserActionButtonState();
-        });
-    }
-
+ 
 
     function initCampaignsTable() {
         crm_js_log('Inicializando DataTable para Campañas.');
@@ -662,128 +571,8 @@
     });
     // --- FIN: Manejador para el formulario de Añadir Instancia ---
 
-    // ** usuarios **
  
-
-    // ** Marketing (Campañas) **
-     
-    // Función para cargar los selects del modal de Campañas
-    function loadCampaignModalSelects() {
-        crm_js_log('Cargando selects para modal de campaña...');
-
-        const instanceSelect = $('#campaign_instance');
-        const tagSelect = $('#campaign_target_tag');
-
-        // 1. Cargar Instancias Activas
-        if (instanceSelect.length) { // Solo si el select existe
-            instanceSelect.empty().append($('<option>', { value: '', text: 'Cargando Instancias...' })); // Placeholder mientras carga
-
-            $.ajax({
-                url: crm_evolution_sender_params.ajax_url,
-                type: 'POST',
-                data: {
-                    action: 'crm_get_active_instances_for_select', // Acción PHP correcta
-                    _ajax_nonce: crm_evolution_sender_params.nonce
-                },
-                success: function(response) {
-                    instanceSelect.empty(); // Limpiar antes de añadir nuevas
-                    if (response.success && Array.isArray(response.data) && response.data.length > 0) {
-                        instanceSelect.append($('<option>', { value: '', text: '-- Seleccionar Instancia --' }));
-                        $.each(response.data, function(index, instanceName) {
-                            instanceSelect.append($('<option>', {
-                                value: instanceName, // El valor es el nombre de la instancia
-                                text: instanceName
-                            }));
-                        });
-                            crm_js_log('Instancias cargadas en select.', 'INFO', response.data);
-                    } else {
-                        instanceSelect.append($('<option>', { value: '', text: 'No hay instancias activas', disabled: true }));
-                        crm_js_log('No se encontraron instancias activas o hubo un error.', 'WARN', response.data);
-                    }
-                },
-                error: function(xhr, status, error) {
-                    instanceSelect.empty().append($('<option>', { value: '', text: 'Error al cargar instancias', disabled: true }));
-                    crm_js_log('Error AJAX cargando instancias para campaña:', 'ERROR', { status: status, error: error });
-                }
-            });
-        } else {
-                crm_js_log('Select #campaign_instance no encontrado.', 'WARN');
-        }
-
-        // 2. Cargar Etiquetas
-        if (tagSelect.length) { // Solo si el select existe
-            tagSelect.empty().append($('<option>', { value: '', text: 'Cargando Etiquetas...' })); // Placeholder
-
-            $.ajax({
-                url: crm_evolution_sender_params.ajax_url,
-                type: 'POST',
-                data: {
-                    action: 'crm_get_etiquetas_for_select', // Acción PHP correcta
-                    _ajax_nonce: crm_evolution_sender_params.nonce
-                },
-                success: function(response) {
-                    tagSelect.empty(); // Limpiar
-                    if (response.success && Array.isArray(response.data) && response.data.length > 0) {
-                        tagSelect.append($('<option>', { value: '', text: '-- Seleccionar Etiqueta --' }));
-                        $.each(response.data, function(index, tag) {
-                            tagSelect.append($('<option>', {
-                                value: tag.value, // 'value' viene del PHP
-                                text: tag.text    // 'text' viene del PHP
-                            }));
-                        });
-                            crm_js_log('Etiquetas cargadas en select.', 'INFO', response.data);
-                    } else {
-                        tagSelect.append($('<option>', { value: '', text: 'No hay etiquetas definidas', disabled: true }));
-                            crm_js_log('No se encontraron etiquetas o hubo un error.', 'WARN', response.data);
-                    }
-                },
-                error: function(xhr, status, error) {
-                    tagSelect.empty().append($('<option>', { value: '', text: 'Error al cargar etiquetas', disabled: true }));
-                    crm_js_log('Error AJAX cargando etiquetas para campaña:', 'ERROR', { status: status, error: error });
-                }
-            });
-        } else {
-                crm_js_log('Select #campaign_target_tag no encontrado.', 'WARN');
-        }
-    }
-
-    // Llamar a la función para cargar los selects cuando el DOM esté listo
-    // Esto asegura que los selects se pueblen antes de que el usuario abra el modal.
-    if ($('#marketing-modal-content').length) { // Solo ejecutar si el modal existe en la página
-        loadCampaignModalSelects();
-    }
-    
-    
-  
-     /** Elimina una campaña */
-    function deleteCampaign(campaignId) {
-        crm_js_log(`Solicitando confirmación para eliminar campaña ID: ${campaignId}`);
-         Swal.fire({
-            title: '¿Estás seguro?',
-            text: `Estás a punto de eliminar esta campaña. Los datos asociados podrían perderse.`,
-            icon: 'warning',
-            showCancelButton: true,
-            confirmButtonColor: '#d33',
-            cancelButtonColor: '#3085d6',
-            confirmButtonText: 'Sí, eliminarla',
-            cancelButtonText: 'Cancelar'
-        }).then((result) => {
-            if (result.isConfirmed) {
-                 crm_js_log(`Confirmada eliminación de campaña ID: ${campaignId}`);
-                performAjaxRequest('crm_delete_campaign', { id: campaignId },
-                    (response) => {
-                        showNotification('Campaña eliminada', 'success', response.message || `La campaña ha sido eliminada.`);
-                        if (campaignsTable) campaignsTable.ajax.reload();
-                    }
-                );
-            } else {
-                 crm_js_log(`Eliminación de campaña ${campaignId} cancelada.`);
-            }
-        });
-    }
-
     // --- Event Handlers ---
-
     /**
      * Inicializa los manejadores de eventos generales.
      */
@@ -1643,22 +1432,9 @@
                                     { user_id: recipientUserId, message_text: messageText },
                                     function(response) { // onSuccess
                                         crm_js_log('[ENVIO-TEXTO] AJAX onSuccess ejecutado.', 'INFO', response);
-                                        // Actualización Optimista para texto
-                                        const nowTimestamp = Math.floor(Date.now() / 1000);
-                                        const messageData = {
-                                            id: 'temp_' + nowTimestamp, text: messageText, timestamp: nowTimestamp, is_outgoing: true, type: 'text'
-                                        };
-                                        const timeStringOptimistic = new Date(messageData.timestamp * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-                                        const messageHtml = `
-                                            <div class="chat-message outgoing" data-msg-id="${messageData.id}">
-                                                <div class="message-bubble">
-                                                    <div class="message-text">${escapeHtml(messageData.text)}</div>
-                                                    <div class="message-time">${timeStringOptimistic}</div>
-                                                </div>
-                                            </div>
-                                        `;
-                                        $('#chat-messages-area').append(messageHtml);
-                                        $('#chat-messages-area').scrollTop($('#chat-messages-area')[0].scrollHeight);
+                                        // --- INICIO: Actualización Optimista ELIMINADA ---
+                                        // Ya no añadimos el mensaje aquí. Esperamos al heartbeat.
+                                        // --- FIN: Actualización Optimista ELIMINADA ---
                                         $messageInput.val('');
                                     }
                                 ).always(function() {
@@ -1897,6 +1673,17 @@
      */
     function renderSingleMessage(msg, container) {
         const $ = jQuery;
+
+        crm_js_log(`[renderSingleMessage] Intentando renderizar msg ID: ${msg.id}`, 'DEBUG'); // <-- Log 1: Inicio
+
+        // --- INICIO: Comprobación de duplicados visuales ---
+        const existingElementCount = container.find(`.chat-message[data-msg-id="${msg.id}"]`).length; // <-- Guardar resultado
+        crm_js_log(`[renderSingleMessage] Comprobando duplicado para msg ID: ${msg.id}. Elementos existentes: ${existingElementCount}`, 'DEBUG'); // <-- Log 2: Resultado de la búsqueda
+        if (existingElementCount > 0) {
+            crm_js_log(`Mensaje ${msg.id} ya existe en la UI (renderSingleMessage), omitiendo.`);
+            return msg.timestamp; // Devolver timestamp aunque se omita para no romper lógica del heartbeat
+        }
+        // --- FIN: Comprobación de duplicados visuales ---
         const messageDate = new Date(msg.timestamp * 1000);
         const timeString = messageDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
         const messageClass = msg.is_outgoing ? 'chat-message outgoing' : 'chat-message incoming';

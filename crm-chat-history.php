@@ -95,7 +95,7 @@ function crm_evolution_sender_chat_history_page_html() {
                     <!-- Contenedor para la vista previa del adjunto -->
                     <div id="chat-attachment-preview" class="chat-attachment-preview" style="display: none;"></div>
                     <textarea id="chat-message-input" placeholder="<?php esc_attr_e( 'Escribe un mensaje aquí...', CRM_EVOLUTION_SENDER_TEXT_DOMAIN ); ?>" rows="1"></textarea>
-                    <button id="send-chat-message" class="button button-primary btn-send" title="Enviar Mensaje"><span class="dashicons dashicons-arrow-right-alt"></span></button> <?php // <-- ID CORREGIDO ?>
+                    <button id="send-chat-message" class="button button-primary btn-send" title="Enviar Mensaje"><span class="dashicons dashicons-arrow-right-alt"></span></button>
                 </div>
             </div>
             <!-- === INICIO: Nueva Columna para Detalles del Contacto === -->

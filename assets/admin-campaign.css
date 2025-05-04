@@ -1,0 +1,6 @@
+/* Estilos específicos para la pantalla de edición de Campañas CPT */
+
+/* Ajustar espacio debajo del wp_editor en el metabox de campañas */
+#crm_campaign_settings .wp-editor-wrap + p.description {
+    margin-top: 5px; /* Reduce el espacio superior */
+}
