@@ -50,7 +50,7 @@ function crm_evolution_register_chat_cpt() {
     );
 
     register_post_type( 'crm_chat', $args );
-    // crm_log('Custom Post Type "crm_chat" registrado.'); // Log para confirmar
+    // //crm_log('Custom Post Type "crm_chat" registrado.'); // Log para confirmar
 }
 add_action( 'init', 'crm_evolution_register_chat_cpt' );
 

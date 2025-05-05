@@ -1,0 +1,113 @@
+/**
+ * Estilos para la vista de tarjetas de instancias
+ * CRM Evolution Sender
+ */
+
+/* Contenedor Principal de Tarjetas */
+.crm-cards-container {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 20px; /* Espacio entre tarjetas */
+    margin-top: 20px;
+}
+
+/* Estilo Base de la Tarjeta */
+.instance-card.card {
+    background-color: #fff;
+    border: 1px solid #ccd0d4;
+    border-radius: 4px;
+    box-shadow: 0 1px 1px rgba(0, 0, 0, 0.04);
+    width: calc(33.333% - 14px); /* Aproximadamente 3 por fila, ajustando por el gap */
+    display: flex;
+    flex-direction: column;
+    overflow: hidden; /* Para contener bordes redondeados */
+}
+
+/* Ajuste para pantallas más pequeñas (ej: 2 por fila) */
+@media (max-width: 960px) {
+    .instance-card.card {
+        width: calc(50% - 10px); /* Aproximadamente 2 por fila */
+    }
+}
+
+/* Ajuste para pantallas muy pequeñas (ej: 1 por fila) */
+@media (max-width: 600px) {
+    .instance-card.card {
+        width: 100%;
+    }
+}
+
+/* Cabecera de la Tarjeta */
+.card-header {
+    padding: 12px 15px;
+    border-bottom: 1px solid #eee;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.instance-avatar {
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    object-fit: cover; /* Para que la imagen no se deforme */
+    background-color: #f0f0f1; /* Color de fondo mientras carga o si no hay imagen */
+}
+
+.instance-name {
+    flex-grow: 1; /* Ocupa el espacio restante */
+    margin: 0;
+    font-size: 1.1em;
+    font-weight: 600;
+}
+
+/* Badge de Estado */
+.instance-status.status-badge {
+    padding: 3px 8px;
+    border-radius: 10px;
+    font-size: 0.8em;
+    font-weight: bold;
+    color: #fff;
+    white-space: nowrap;
+}
+
+.status-badge.status-success { background-color: #28a745; } /* Verde */
+.status-badge.status-danger { background-color: #dc3545; } /* Rojo */
+.status-badge.status-warning { background-color: #ffc107; color: #333; } /* Naranja */
+.status-badge.status-info { background-color: #17a2b8; } /* Azul */
+.status-badge.status-secondary { background-color: #6c757d; } /* Gris */
+
+/* Cuerpo de la Tarjeta (si se usa en el futuro) */
+.card-body {
+    padding: 15px;
+    flex-grow: 1; /* Permite que el cuerpo crezca si es necesario */
+}
+
+/* Acciones de la Tarjeta */
+.card-actions {
+    padding: 10px 15px;
+    background-color: #f8f9fa;
+    border-top: 1px solid #eee;
+    display: flex;
+    gap: 8px; /* Espacio entre botones */
+    justify-content: flex-end; /* Alinea botones a la derecha */
+}
+
+.card-actions .button .dashicons {
+    margin-right: 0; /* Quita margen si solo usamos iconos */
+    vertical-align: middle;
+}
+
+/* Mensajes */
+.loading-message,
+.no-instances-message,
+.error-message {
+    width: 100%;
+    text-align: center;
+    padding: 20px;
+    color: #666;
+}
+
+.error-message {
+    color: #dc3545;
+}

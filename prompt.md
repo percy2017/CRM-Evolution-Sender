@@ -60,6 +60,17 @@
         *   Imágenes, videos y enlaces a documentos adjuntos.
         *   Hora del mensaje.
         *   Scroll automático al último mensaje.
+    *   **Interfaz de Gestión de Instancias (Tarjetas):**
+        *   Se creó un archivo `crm-instances.php` para la página principal del plugin (vista de tarjetas).
+        *   Se crearon `assets/admin-instances.css` y `assets/admin-instances.js` para esta vista.
+        *   Carga AJAX de instancias y renderizado como tarjetas usando `wp.template`.
+        *   Funcionalidad para Añadir (modal Thickbox), Obtener QR (modal), Eliminar (con confirmación SweetAlert y desconexión previa en API).
+        *   **Actualización Automática Modal QR (Heartbeat):**
+            *   Webhook (`crm-rest-api.php`) guarda eventos `connection.update` y `qrcode.updated` en transients.
+            *   Heartbeat PHP (`crm-instances.php`) lee transients y envía actualizaciones al JS.
+            *   Heartbeat JS (`admin-instances.js`) cierra el modal al conectar y actualiza la imagen QR si cambia.
+        *   Hora del mensaje.
+        *   Scroll automático al último mensaje.
 4.  **Manejo de Eliminación de Usuario:**
     *   Al eliminar un usuario WP y elegir "Borrar todo el contenido", se eliminan correctamente los posts `crm_chat` asociados (porque `post_author` es el `contact_user_id`).
     *   Se implementó una función (`crm_delete_user_avatar_on_user_delete` en `crm-evolution-sender.php`) enganchada a `delete_user` para eliminar el archivo de avatar de la Biblioteca de Medios.

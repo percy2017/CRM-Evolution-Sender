@@ -42,29 +42,29 @@ function crm_evolution_webhook_handler_callback( WP_REST_Request $request ) {
 
     // Obtener los datos JSON enviados por Evolution API
     $data = $request->get_json_params();
-    error_log('Webhook recibido - '. print_r( $data, true ));
-   
+    // Log inicial más conciso
+    error_log('[Webhook] Datos recibidos: ' . json_encode($data)); // Usar json_encode para un log más limpio
+
     // Extraer Evento e Instancia
     $event = isset($data['event']) ? $data['event'] : 'evento_desconocido';
     $instance = isset($data['instance']) ? $data['instance'] : 'instancia_desconocida';
-    crm_log( "Webhook recibido - Instancia: [{$instance}], Evento: [{$event}]", 'INFO' );
+    error_log( "[Webhook][{$instance}] Evento: [{$event}]" ); // Formato consistente
 
     // Manejar eventos con switch
     switch ($event) {
         case 'messages.upsert':
-            crm_log( "Webhook [{$instance}]: Procesando evento 'messages.upsert'.", 'INFO' );
-            // --- INICIO: Extracción Detallada de Datos del Mensaje ---
             $message_payload = $data['data'] ?? null;
+            error_log("[Webhook][{$instance}][messages.upsert] Procesando payload...");
             $instance_name = sanitize_text_field($data['instance'] ?? 'desconocida');
-            $api_sender_jid = sanitize_text_field($data['sender'] ?? null); // JID de la instancia que envía el webhook
+            $api_sender_jid = sanitize_text_field($data['sender'] ?? null);
 
             if (!$message_payload || !isset($message_payload['key'], $message_payload['messageTimestamp'])) {
-                crm_log("Error: Payload 'data' inválido o incompleto en 'messages.upsert'.", 'ERROR', $data);
-                break; // Salir del case si faltan datos esenciales
+                error_log("Error: Payload 'data' inválido o incompleto en 'messages.upsert'.");
+                break;
             }
 
             $key_info = $message_payload['key'];
-            $message_info = $message_payload['message'] ?? null; // El objeto 'message' puede ser null (ej: notificaciones de estado)
+            $message_info = $message_payload['message'] ?? null;
 
             // Datos clave de identificación
             $remote_jid = sanitize_text_field($key_info['remoteJid'] ?? '');
@@ -92,7 +92,7 @@ function crm_evolution_webhook_handler_callback( WP_REST_Request $request ) {
             $jid_for_user_processing = $is_group_message ? ($from_me ? $remote_jid : $participant_jid) : $remote_jid;
 
             if (empty($jid_for_user_processing)) {
-                 crm_log("Error: No se pudo determinar el JID para procesar el usuario.", 'ERROR', $key_info);
+                 error_log("[Webhook][{$instance}][messages.upsert] Error: No se pudo determinar el JID para procesar el usuario.");
                  break;
             }
 
@@ -100,13 +100,13 @@ function crm_evolution_webhook_handler_callback( WP_REST_Request $request ) {
             // Pasamos pushName solo si es un mensaje entrante.
             $contact_user_id = crm_process_single_jid($jid_for_user_processing, $instance_name, $push_name, !$from_me); // <--- AQUÍ SE PROCESA EL USUARIO
 
-            if ($contact_user_id === 0 && !$is_group_message) { // Si falla y NO es grupo, no podemos continuar
-                crm_log("Error: No se pudo encontrar o crear el usuario para JID '{$jid_for_user_processing}'. No se guardará el mensaje.", 'ERROR');
+            if ($contact_user_id === 0 && !$is_group_message) {
+                error_log("[Webhook][{$instance}][messages.upsert] Error: No se pudo encontrar o crear el usuario para JID '{$jid_for_user_processing}'. No se guardará el mensaje.");
                 break;
             }
-             // Si es grupo y falla, $contact_user_id será 0, pero podemos continuar asociando al admin o un usuario genérico si quisiéramos.
+            error_log("[Webhook][{$instance}][messages.upsert] Usuario contacto procesado. JID: '{$jid_for_user_processing}', User ID: {$contact_user_id}");
              // Por ahora, si es grupo y falla, el post_author será 0 (Admin).
-            crm_log("Usuario contacto procesado. JID: '{$jid_for_user_processing}', User ID: {$contact_user_id}", 'INFO');
+            //crm_log("Usuario contacto procesado. JID: '{$jid_for_user_processing}', User ID: {$contact_user_id}", 'INFO');
             // --- FIN: Procesar Usuario ---
 
             // --- INICIO: Extraer Contenido del Mensaje ---
@@ -115,6 +115,7 @@ function crm_evolution_webhook_handler_callback( WP_REST_Request $request ) {
             $media_caption = null;
             $media_mimetype = null;
             $base64_data = $data['data']['message']['base64'] ?? null; // Base64 está DENTRO de data.message
+            error_log("[Webhook][{$instance}][messages.upsert] Base64 encontrado: " . ($base64_data ? 'Sí' : 'No'));
 
             // Extraer tipo y contenido específico (simplificado, necesita más casos)
             if (isset($message_info['conversation'])) {
@@ -134,13 +135,27 @@ function crm_evolution_webhook_handler_callback( WP_REST_Request $request ) {
             } elseif (isset($message_info['audioMessage'])) {
                 $message_type = 'audio';
                 $media_caption = null; 
-                // Primero obtén el mimetype completo
-                $raw_mimetype = $message_info['audioMessage']['mimetype'] ?? 'audio/ogg'; // Obtener y poner default
-                // Ahora sí, divídelo
+                $raw_mimetype = $message_info['audioMessage']['mimetype'] ?? 'audio/ogg';
                 $mime_parts = explode(';', $raw_mimetype);
-                $media_mimetype = trim($mime_parts[0]); // Tomar solo la parte principal 'audio/ogg'
-            } 
+                $media_mimetype = trim($mime_parts[0]);
+            } elseif (isset($message_info['documentWithCaptionMessage'])) { // <-- NUEVO BLOQUE PARA DOCUMENTO CON CAPTION
+                $message_type = 'document';
+                // Acceder al documentMessage anidado
+                $doc_msg = $message_info['documentWithCaptionMessage']['message']['documentMessage'] ?? null;
+                if ($doc_msg) {
+                    $media_caption = $doc_msg['caption'] ?? null;
+                    $media_mimetype = $doc_msg['mimetype'] ?? 'application/octet-stream';
+                    $filename = $doc_msg['fileName'] ?? null;
+                    $message_text = $media_caption ?: $filename; // Usar caption o filename como texto
+                }
+            } elseif (isset($message_info['documentMessage'])) { // <-- Bloque existente para documento SIN caption
+                $message_type = 'document';
+                $media_caption = $message_info['documentMessage']['caption'] ?? null;
+                $media_mimetype = $message_info['documentMessage']['mimetype'] ?? 'application/octet-stream'; // Default genérico
+                $message_text = $media_caption ?: ($message_info['documentMessage']['fileName'] ?? null); // Usar caption o filename
+            }
             // ... añadir más tipos: audio, document, location, etc.
+            error_log("[Webhook][{$instance}][messages.upsert] Tipo de mensaje detectado: {$message_type}. Texto: " . ($message_text ? 'Sí' : 'No') . ". Caption: " . ($media_caption ? 'Sí' : 'No'));
 
             // Si hay base64 pero no se detectó tipo media, intentar deducir (o marcar como 'file')
             if ($base64_data && $message_type === 'unknown') {
@@ -151,6 +166,7 @@ function crm_evolution_webhook_handler_callback( WP_REST_Request $request ) {
 
             // --- INICIO: Preparar y Guardar Mensaje ---
             if ($message_type !== 'unknown' || $base64_data) { // Solo guardar si es un tipo conocido o tiene adjunto
+                error_log("[Webhook][{$instance}][messages.upsert] Preparando datos para guardar mensaje ID: {$message_id_wa}");
                 $message_data_to_save = [
                     'contact_user_id'     => $contact_user_id, // ID del usuario contacto (o 0 si es grupo y falló)
                     'instance_name'       => $instance_name,
@@ -168,22 +184,53 @@ function crm_evolution_webhook_handler_callback( WP_REST_Request $request ) {
                     'participant_jid'     => $participant_jid,
                 ];
 
-                $save_result = crm_save_chat_message($message_data_to_save); // <--- AQUÍ SE GUARDA EL MENSAJE
+                $save_result = crm_save_chat_message($message_data_to_save);
 
                 if (is_wp_error($save_result)) {
-                    crm_log("Error al guardar el mensaje para WA ID {$message_id_wa}: " . $save_result->get_error_message(), 'ERROR');
+                    error_log("[Webhook][{$instance}][messages.upsert] Error al guardar mensaje WA ID {$message_id_wa}: " . $save_result->get_error_message());
                 } else {
-                    crm_log("Mensaje para WA ID {$message_id_wa} guardado con éxito. Post ID: {$save_result}", 'INFO');
+                    error_log("[Webhook][{$instance}][messages.upsert] Mensaje WA ID {$message_id_wa} guardado con éxito. Post ID: {$save_result}");
                 }
             } else {
-                 crm_log("Mensaje WA ID {$message_id_wa} ignorado (tipo desconocido y sin adjunto).", 'WARN', $message_info);
+                 error_log("[Webhook][{$instance}][messages.upsert] Mensaje WA ID {$message_id_wa} ignorado (tipo desconocido y sin adjunto).");
             }
             // --- FIN: Preparar y Guardar Mensaje ---
         
             break;
 
+        case 'connection.update':
+            $connection_data = $data['data'] ?? null;
+            $new_status = isset($connection_data['state']) ? sanitize_text_field($connection_data['state']) : null;
+
+            if ($instance && $new_status) {
+                // Guardar el nuevo estado en un transient que expira en 60 segundos
+                set_transient('crm_instance_status_' . $instance, $new_status, 60);
+                error_log( "[Webhook][{$instance}][connection.update] Estado actualizado a '{$new_status}'. Transient guardado." );
+            } else {
+                error_log( "[Webhook][{$instance}][connection.update] Evento recibido pero sin datos de estado válidos." );
+            }
+            break;
+
+        case 'qrcode.updated': // <-- NUEVO CASE para manejar actualizaciones del QR
+            error_log( "[Webhook][{$instance}][qrcode.updated] Procesando evento..." );
+            $qr_data = $data['data'] ?? null;
+            // La estructura exacta puede variar, ajusta según la respuesta real de tu API
+            $new_qr_base64 = $qr_data['qrcode']['base64'] ?? ($qr_data['base64'] ?? null);
+
+            if ($instance && $new_qr_base64) {
+                // Asegurar prefijo data URI
+                if (strpos($new_qr_base64, 'data:image') === false) {
+                    $new_qr_base64 = 'data:image/png;base64,' . $new_qr_base64;
+                }
+                // Guardar el nuevo QR en un transient que expira en 60 segundos
+                set_transient('crm_instance_qr_' . $instance, $new_qr_base64, 60);
+                error_log( "[Webhook][{$instance}][qrcode.updated] Nuevo QR recibido. Transient guardado.");
+            } else {
+                error_log( "[Webhook][{$instance}][qrcode.updated] Evento recibido pero sin datos de QR válidos." );
+            }
+            break;
         default:
-            crm_log( "Webhook [{$instance}]: Evento '{$event}' recibido pero no manejado actualmente.", 'WARN' );
+            error_log( "[Webhook][{$instance}] Evento '{$event}' recibido pero no manejado actualmente." );
             break;
     }
 
@@ -207,7 +254,7 @@ function crm_evolution_webhook_handler_callback( WP_REST_Request $request ) {
 function crm_process_single_jid($jid, $instanceName, $pushNameToUse = null, $usePushName = false) {
     // Validar que sea un JID de usuario individual
     if (strpos($jid, '@s.whatsapp.net') === false) {
-        crm_log("JID '{$jid}' no es un usuario individual (@s.whatsapp.net). Ignorando.", 'DEBUG');
+        //crm_log("JID '{$jid}' no es un usuario individual (@s.whatsapp.net). Ignorando.", 'DEBUG');
         return 0;
     }
 
@@ -224,16 +271,16 @@ function crm_process_single_jid($jid, $instanceName, $pushNameToUse = null, $use
 
     if ($user_id) {
         // Si el usuario ya existe, no hacemos NADA más. Ni avatar, ni actualizar datos.
-        crm_log("Usuario encontrado para JID '{$jid}' con User ID: {$user_id}. No se realizarán más acciones.", 'INFO');
+        //crm_log("Usuario encontrado para JID '{$jid}' con User ID: {$user_id}. No se realizarán más acciones.", 'INFO');
         return $user_id; // Salir inmediatamente
 
     } else {
-        crm_log("Usuario NO encontrado para JID '{$jid}'. Intentando crear uno nuevo.", 'INFO');
+        //crm_log("Usuario NO encontrado para JID '{$jid}'. Intentando crear uno nuevo.", 'INFO');
 
         // Extraer número del JID para username/email placeholder
         $number = strstr($jid, '@', true); // Obtiene la parte antes del @
         if (!$number) {
-            crm_log("Error: No se pudo extraer el número del JID '{$jid}'", 'ERROR');
+            //crm_log("Error: No se pudo extraer el número del JID '{$jid}'", 'ERROR');
             return 0;
         }
 
@@ -258,14 +305,14 @@ function crm_process_single_jid($jid, $instanceName, $pushNameToUse = null, $use
         $user_id = wp_insert_user($user_data);
 
         if (is_wp_error($user_id)) {
-            crm_log("Error al crear usuario para JID '{$jid}': " . $user_id->get_error_message(), 'ERROR');
+            //crm_log("Error al crear usuario para JID '{$jid}': " . $user_id->get_error_message(), 'ERROR');
             // Intentar con un username ligeramente diferente si el error es por duplicado
             if ('existing_user_login' === $user_id->get_error_code()) {
                  $username .= '_' . time(); // Añadir timestamp para unicidad
                  $user_data['user_login'] = $username;
                  $user_id = wp_insert_user($user_data);
                  if (is_wp_error($user_id)) {
-                     crm_log("Error al RE-intentar crear usuario para JID '{$jid}': " . $user_id->get_error_message(), 'ERROR');
+                     //crm_log("Error al RE-intentar crear usuario para JID '{$jid}': " . $user_id->get_error_message(), 'ERROR');
                      return 0;
                  }
             } else {
@@ -283,9 +330,9 @@ function crm_process_single_jid($jid, $instanceName, $pushNameToUse = null, $use
         if (!empty($defined_tags)) {
             $default_tag_key = array_key_first($defined_tags); // Obtener la clave de la primera etiqueta
             update_user_meta($user_id, '_crm_lifecycle_tag', $default_tag_key);
-            crm_log("Nuevo usuario creado con User ID: {$user_id} para JID '{$jid}'. Username: {$username}, Display Name: {$display_name}. Etiqueta por defecto asignada: '{$default_tag_key}'", 'INFO');
+            //crm_log("Nuevo usuario creado con User ID: {$user_id} para JID '{$jid}'. Username: {$username}, Display Name: {$display_name}. Etiqueta por defecto asignada: '{$default_tag_key}'", 'INFO');
         } else {
-            crm_log("Nuevo usuario creado con User ID: {$user_id} para JID '{$jid}'. Username: {$username}, Display Name: {$display_name}. No se asignó etiqueta por defecto (ninguna definida).", 'INFO');
+            //crm_log("Nuevo usuario creado con User ID: {$user_id} para JID '{$jid}'. Username: {$username}, Display Name: {$display_name}. No se asignó etiqueta por defecto (ninguna definida).", 'INFO');
         }
 
         // Si llegamos aquí, significa que el usuario se acaba de CREAR.
@@ -312,11 +359,11 @@ function crm_fetch_and_save_avatar($user_id, $jid, $instanceName) {
     // *** INICIO: Verificar si ya existe un avatar para este usuario ***
     $existing_attachment_id = get_user_meta($user_id, '_crm_avatar_attachment_id', true);
     if ($existing_attachment_id) {
-        crm_log("El usuario User ID: {$user_id} ya tiene un avatar asociado (Attachment ID: {$existing_attachment_id}). No se buscará ni actualizará.", 'INFO');
+        //crm_log("El usuario User ID: {$user_id} ya tiene un avatar asociado (Attachment ID: {$existing_attachment_id}). No se buscará ni actualizará.", 'INFO');
         return true; // Consideramos éxito ya que el objetivo (tener un avatar) se cumple.
     }
 
-    crm_log("El usuario User ID: {$user_id} NO tiene avatar guardado. Procediendo a buscar uno.", 'INFO');
+    //crm_log("El usuario User ID: {$user_id} NO tiene avatar guardado. Procediendo a buscar uno.", 'INFO');
 
     // 1. Llamar a la API de Evolution para obtener la URL de la imagen de perfil
     $endpoint = "/chat/fetchProfilePictureUrl/{$instanceName}";
@@ -325,18 +372,18 @@ function crm_fetch_and_save_avatar($user_id, $jid, $instanceName) {
     $api_response = crm_evolution_api_request('POST', $endpoint, $body, null); // Usar POST y pasar el body
 
     if (is_wp_error($api_response)) {
-        crm_log("Error API al obtener URL del avatar para JID {$jid}: " . $api_response->get_error_message(), 'ERROR');
+        //crm_log("Error API al obtener URL del avatar para JID {$jid}: " . $api_response->get_error_message(), 'ERROR');
         return false;
     }
 
     if (empty($api_response['profilePictureUrl'])) {
-        crm_log("La API no devolvió una URL de avatar para JID {$jid}. Respuesta: " . json_encode($api_response), 'WARN');
+        //crm_log("La API no devolvió una URL de avatar para JID {$jid}. Respuesta: " . json_encode($api_response), 'WARN');
         // No hacemos nada más si no hay URL, ya que no había avatar previo.
         return false;
     }
 
     $avatar_url = $api_response['profilePictureUrl'];
-    crm_log("URL del avatar obtenida para JID {$jid}: {$avatar_url}", 'DEBUG');
+    //crm_log("URL del avatar obtenida para JID {$jid}: {$avatar_url}", 'DEBUG');
 
     // 2. Descargar la imagen desde la URL obtenida
     // Necesitamos incluir los archivos necesarios para media_handle_sideload
@@ -348,7 +395,7 @@ function crm_fetch_and_save_avatar($user_id, $jid, $instanceName) {
     $tmp = download_url($avatar_url);
 
     if (is_wp_error($tmp)) {
-        crm_log("Error al descargar el avatar desde {$avatar_url}: " . $tmp->get_error_message(), 'ERROR');
+        //crm_log("Error al descargar el avatar desde {$avatar_url}: " . $tmp->get_error_message(), 'ERROR');
         @unlink($tmp); // Eliminar archivo temporal si existe
         return false;
     }
@@ -372,14 +419,14 @@ function crm_fetch_and_save_avatar($user_id, $jid, $instanceName) {
     @unlink($tmp);
 
     if (is_wp_error($attachment_id)) {
-        crm_log("Error al guardar el avatar en la Media Library: " . $attachment_id->get_error_message(), 'ERROR');
+        //crm_log("Error al guardar el avatar en la Media Library: " . $attachment_id->get_error_message(), 'ERROR');
         return false;
     }
 
     // 4. Guardar el ID del nuevo adjunto en el metadato del usuario.
     // No necesitamos eliminar el anterior porque la verificación inicial asegura que no había uno.
     update_user_meta($user_id, '_crm_avatar_attachment_id', $attachment_id);
-    crm_log("Avatar guardado con éxito en Media Library (Attachment ID: {$attachment_id}) y asociado al User ID: {$user_id}", 'INFO');
+    //crm_log("Avatar guardado con éxito en Media Library (Attachment ID: {$attachment_id}) y asociado al User ID: {$user_id}", 'INFO');
 
     return true;
 }
@@ -427,7 +474,8 @@ function crm_find_or_create_user_with_avatar($remoteJid, $senderJid, $pushName, 
  * @return int|WP_Error El ID del post creado o WP_Error en caso de fallo.
  */
 function crm_save_chat_message( $message_data ) {
-    crm_log( 'Iniciando crm_save_chat_message con datos:', 'DEBUG', $message_data );
+    error_log( '[crm_save_chat_message] Iniciando guardado para WA ID: ' . ($message_data['message_id_wa'] ?? 'N/A') );
+    //crm_log( 'Iniciando crm_save_chat_message con datos:', 'DEBUG', $message_data );
 
     // --- INICIO: Comprobación de Duplicados ---
     if ( ! empty( $message_data['whatsapp_message_id'] ) ) {
@@ -445,7 +493,7 @@ function crm_save_chat_message( $message_data ) {
         );
         $existing_posts = get_posts( $args );
         if ( ! empty( $existing_posts ) ) {
-            crm_log( "Mensaje duplicado detectado para WA ID {$message_data['whatsapp_message_id']}. No se guardará.", 'INFO' );
+            error_log( "[crm_save_chat_message] Mensaje duplicado detectado para WA ID {$message_data['whatsapp_message_id']}. No se guardará. Post existente: " . $existing_posts[0] );
             return $existing_posts[0]; // Devolver el ID del post existente podría ser útil
         }
     }
@@ -455,7 +503,7 @@ function crm_save_chat_message( $message_data ) {
 
     // 1. Procesar archivo adjunto si existe
     if ( ! empty( $message_data['base64_data'] ) && ! empty( $message_data['media_mimetype'] ) ) {
-        crm_log( "Intentando procesar archivo adjunto Base64 (MIME: {$message_data['media_mimetype']}).", 'DEBUG' );
+        error_log( "[crm_save_chat_message] Intentando procesar archivo adjunto Base64 (MIME: {$message_data['media_mimetype']})." );
         $attachment_id = crm_process_base64_media(
             $message_data['base64_data'],
             $message_data['media_mimetype'],
@@ -464,11 +512,11 @@ function crm_save_chat_message( $message_data ) {
         );
 
         if ( is_wp_error( $attachment_id ) ) {
-            crm_log( 'Error al procesar media Base64: ' . $attachment_id->get_error_message(), 'ERROR' );
+            error_log( '[crm_save_chat_message] Error al procesar media Base64: ' . $attachment_id->get_error_message() );
             // Decidir si continuar sin el adjunto o devolver error. Por ahora, continuamos.
             $attachment_id = null;
         } else {
-            crm_log( "Archivo adjunto procesado con éxito. Attachment ID: {$attachment_id}", 'INFO' );
+            error_log( "[crm_save_chat_message] Archivo adjunto procesado con éxito. Attachment ID: {$attachment_id}" );
         }
     }
 
@@ -496,11 +544,11 @@ function crm_save_chat_message( $message_data ) {
     $post_id = wp_insert_post( $post_data, true ); // true para devolver WP_Error si falla
 
     if ( is_wp_error( $post_id ) ) {
-        crm_log( 'Error al insertar post crm_chat: ' . $post_id->get_error_message(), 'ERROR' );
+        error_log( '[crm_save_chat_message] Error al insertar post crm_chat: ' . $post_id->get_error_message() );
         return $post_id;
     }
 
-    crm_log( "Post crm_chat creado con ID: {$post_id}", 'INFO' );
+    error_log( "[crm_save_chat_message] Post crm_chat creado con ID: {$post_id}" );
 
     // 4. Guardar metadatos
     update_post_meta( $post_id, '_crm_contact_user_id', $message_data['contact_user_id'] );
@@ -528,7 +576,7 @@ function crm_save_chat_message( $message_data ) {
         update_post_meta( $post_id, '_crm_media_caption', $message_data['media_caption'] );
     }
 
-    crm_log( "Metadatos guardados para el post crm_chat ID: {$post_id}", 'INFO' );
+    error_log( "[crm_save_chat_message] Metadatos guardados para el post crm_chat ID: {$post_id}" );
 
     return $post_id;
 }
@@ -543,6 +591,7 @@ function crm_save_chat_message( $message_data ) {
  * @return int|WP_Error ID del adjunto creado o WP_Error en caso de fallo.
  */
 function crm_process_base64_media( $base64_data, $mime_type, $caption = null, $post_author_id = 0 ) {
+    error_log( "[crm_process_base64_media] Iniciando procesamiento para MIME: {$mime_type}" );
     // Incluir archivos necesarios de WP
     require_once( ABSPATH . 'wp-admin/includes/media.php' );
     require_once( ABSPATH . 'wp-admin/includes/file.php' );
@@ -551,6 +600,7 @@ function crm_process_base64_media( $base64_data, $mime_type, $caption = null, $p
     // Decodificar Base64
     $decoded_data = base64_decode( $base64_data );
     if ( $decoded_data === false ) {
+        error_log( "[crm_process_base64_media] Error: No se pudo decodificar los datos Base64." );
         return new WP_Error( 'base64_decode_failed', 'No se pudo decodificar los datos Base64.' );
     }
 
@@ -564,6 +614,7 @@ function crm_process_base64_media( $base64_data, $mime_type, $caption = null, $p
     $upload = wp_upload_bits( $filename, null, $decoded_data );
 
     if ( ! empty( $upload['error'] ) ) {
+        error_log( "[crm_process_base64_media] Error en wp_upload_bits: " . $upload['error'] );
         return new WP_Error( 'wp_upload_bits_failed', $upload['error'] );
     }
 
@@ -581,6 +632,7 @@ function crm_process_base64_media( $base64_data, $mime_type, $caption = null, $p
     $attachment_id = wp_insert_attachment( $attachment, $upload['file'] );
 
     if ( is_wp_error( $attachment_id ) ) {
+        error_log( "[crm_process_base64_media] Error en wp_insert_attachment: " . $attachment_id->get_error_message() );
         @unlink( $upload['file'] ); // Eliminar archivo si falla la inserción
         return $attachment_id;
     }
@@ -589,6 +641,7 @@ function crm_process_base64_media( $base64_data, $mime_type, $caption = null, $p
     $attachment_data = wp_generate_attachment_metadata( $attachment_id, $upload['file'] );
     wp_update_attachment_metadata( $attachment_id, $attachment_data );
 
+    error_log( "[crm_process_base64_media] Adjunto creado con éxito. ID: {$attachment_id}" );
     return $attachment_id;
 }
 
@@ -611,10 +664,10 @@ function mime_content_type_to_extension($mime_type) {
         'audio/mpeg' => 'mp3',
         'audio/ogg'  => 'ogg',
         'application/pdf' => 'pdf',
-        'application/msword' => 'doc',
-        'application/vnd.openxmlformats-officedocument.wordprocessingml.document' => 'docx',
-        'application/vnd.ms-excel' => 'xls',
-        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' => 'xlsx',
+        'application/msword' => 'doc', // <-- Añadido
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document' => 'docx', // <-- Añadido
+        'application/vnd.ms-excel' => 'xls', // <-- Añadido
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' => 'xlsx', // <-- Añadido
         // Añadir más mapeos según sea necesario
     ];
     return $mime_map[$mime_type] ?? false;

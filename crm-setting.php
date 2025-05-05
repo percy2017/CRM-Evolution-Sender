@@ -403,11 +403,11 @@ function crm_evolution_sender_tags_section_render() {
 function crm_evolution_sender_settings_page_html() {
     // Verificar permisos del usuario
     if ( ! current_user_can( 'manage_options' ) ) {
-        crm_log('Intento de acceso no autorizado a la página de ajustes.', 'ERROR');
+        //crm_log('Intento de acceso no autorizado a la página de ajustes.', 'ERROR');
         wp_die( __( 'No tienes permisos suficientes para acceder a esta página.', CRM_EVOLUTION_SENDER_TEXT_DOMAIN ) );
     }
     
-    crm_log('Cargando página de ajustes del plugin (API y Etiquetas).');
+    //crm_log('Cargando página de ajustes del plugin (API y Etiquetas).');
 
     ?>
     <div class="wrap crm-evolution-sender-wrap">
@@ -442,7 +442,7 @@ function crm_evolution_sender_settings_page_html() {
             // Botón de guardar SOLO para los ajustes de la API
             submit_button( __( 'Guardar Ajustes API', CRM_EVOLUTION_SENDER_TEXT_DOMAIN ) );
 
-            crm_log('Formulario principal de ajustes API renderizado.');
+            //crm_log('Formulario principal de ajustes API renderizado.');
             ?>
         </form>
         <!-- == FIN Formulario API == -->
@@ -459,14 +459,14 @@ function crm_evolution_sender_settings_page_html() {
         // que es manejado por crm_handle_tag_actions vía admin_init.
         echo '<h2>' . __('Gestionar Etiquetas (Ciclo de Vida)', CRM_EVOLUTION_SENDER_TEXT_DOMAIN) . '</h2>';
         crm_evolution_sender_tags_section_render();
-        crm_log('Sección de gestión de etiquetas renderizada.');
+        //crm_log('Sección de gestión de etiquetas renderizada.');
         ?>
         <!-- == FIN Sección Etiquetas == -->
 
 
     </div><!-- .wrap -->
     <?php
-     crm_log('Página de ajustes (API y Etiquetas) renderizada completamente.');
+     //crm_log('Página de ajustes (API y Etiquetas) renderizada completamente.');
 }
 
 // --- FIN del archivo crm-setting.php ---

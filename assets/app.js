@@ -50,9 +50,6 @@
 
     // --- Variables Globales del Módulo ---
     let instancesTable = null; // Referencia a la DataTable de Instancias
-    let usersTable = null;     // Referencia a la DataTable de Usuarios
-    let campaignsTable = null; // Referencia a la DataTable de Campañas
-    let phoneInputInstance = null; //instancia de intl-tel-inpu
 
     /**
     * Inicializa la DataTable para la tabla de Instancias API.
@@ -186,9 +183,6 @@
             order: [[ 1, 'asc' ]] // Ordenar por nombre de instancia (ahora índice 1) por defecto
         });
     }
-
-
- 
 
     function initCampaignsTable() {
         crm_js_log('Inicializando DataTable para Campañas.');
@@ -337,7 +331,6 @@
         }
     };
 
-    // --- Funciones AJAX ---
 
     /**
      * Realiza una llamada AJAX genérica al backend de WordPress.
@@ -394,9 +387,6 @@
             }
         });
     }
-
-    // --- Funciones CRUD y de Interacción ---
-    // ** Instancias **
 
     /** Elimina una instancia */
     function deleteInstance(instanceName) {
@@ -569,7 +559,6 @@
             $submitButton.prop('disabled', false).val(originalButtonText);
             });
     });
-    // --- FIN: Manejador para el formulario de Añadir Instancia ---
 
  
     // --- Event Handlers ---
@@ -1323,6 +1312,15 @@
                                 </div>
                                 ${msg.caption ? `<div class="message-caption">${escapeHtml(msg.caption)}</div>` : ''}
                             `;
+                        } else if (msg.type === 'document' && msg.attachment_url) { // <-- NUEVO BLOQUE
+                            // Extraer nombre de archivo como fallback si no hay caption
+                            const filename = msg.caption || msg.attachment_url.split('/').pop();
+                            messageContentHtml = `
+                                <div class="message-document">
+                                    <a href="${escapeHtml(msg.attachment_url)}" target="_blank" download="${escapeHtml(filename)}">
+                                        <span class="dashicons dashicons-media-default" style="vertical-align: middle; margin-right: 5px;"></span> ${escapeHtml(filename)}
+                                    </a>
+                                </div>`;
                         } else if (msg.type === 'video' && msg.attachment_url) {
                             messageContentHtml = `
                                 <div class="message-media">

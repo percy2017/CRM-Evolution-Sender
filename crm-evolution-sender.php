@@ -24,36 +24,14 @@ define( 'CRM_EVOLUTION_SENDER_PLUGIN_URL', plugin_dir_url( __FILE__ ) );
 define( 'CRM_EVOLUTION_SENDER_TEXT_DOMAIN', 'crm-evolution-sender' );
 
 // --- Archivos Requeridos ---
-require_once CRM_EVOLUTION_SENDER_PLUGIN_DIR . 'crm-main.php';
+// require_once CRM_EVOLUTION_SENDER_PLUGIN_DIR . 'crm-main.php';
+require_once CRM_EVOLUTION_SENDER_PLUGIN_DIR . 'crm-instances.php';
 require_once CRM_EVOLUTION_SENDER_PLUGIN_DIR . 'crm-setting.php';
-// require_once CRM_EVOLUTION_SENDER_PLUGIN_DIR . 'crm-cron.php'; // Descomentar cuando se implemente
 require_once CRM_EVOLUTION_SENDER_PLUGIN_DIR . 'crm-ajax-handlers.php';
 require_once CRM_EVOLUTION_SENDER_PLUGIN_DIR . 'crm-rest-api.php';
 require_once CRM_EVOLUTION_SENDER_PLUGIN_DIR . 'crm-cpt-chat.php';
 require_once CRM_EVOLUTION_SENDER_PLUGIN_DIR . 'crm-cpt-campaign.php';
 require_once CRM_EVOLUTION_SENDER_PLUGIN_DIR . 'crm-chat-history.php';
-
-
-
-
-// --- Logging Básico (PHP) ---
-if ( ! function_exists( 'crm_log' ) ) {
-    /**
-     * Función simple de logging. Escribe en wp-content/debug.log si WP_DEBUG_LOG está activado.
-     * @param mixed $message Mensaje o dato a registrar.
-     * @param string $level Nivel de log (INFO, DEBUG, ERROR).
-     */
-    function crm_log( $message, $level = 'INFO' ) {
-        if ( defined( 'WP_DEBUG_LOG' ) && WP_DEBUG_LOG === true ) {
-            $prefix = '[CRM Evolution Sender ' . $level . ' ' . date( 'Y-m-d H:i:s' ) . '] ';
-            if ( is_array( $message ) || is_object( $message ) ) {
-                error_log( $prefix . print_r( $message, true ) );
-            } else {
-                error_log( $prefix . $message );
-            }
-        }
-    }
-}
 
 // --- Hooks ---
 
@@ -66,7 +44,7 @@ function crm_evolution_sender_admin_menu() {
         __( 'CRM Evolution', CRM_EVOLUTION_SENDER_TEXT_DOMAIN ), // Título del menú
         'manage_options', // Capacidad requerida
         'crm-evolution-sender-main', // Slug del menú
-        'crm_evolution_sender_main_page_html', // Función que muestra el contenido
+        'crm_render_instances_page_html', // <--- CAMBIO AQUÍ: Nueva función callback (definida en crm-instances.php)
         'dashicons-whatsapp', // Icono (WhatsApp)
         25 // Posición
     );
@@ -116,95 +94,143 @@ function crm_evolution_sender_enqueue_assets( $hook ) {
         'crm-evolution_page_crm-evolution-sender-settings', // Hook para la página de ajustes
         'crm-evolution_page_crm-evolution-chat-history'     // Hook para la nueva página de historial de chats
     ];
-    if ( ! in_array($hook, $plugin_pages) ) {
-        return;
-    }
-    
-    // biblioteca de medios
+
     wp_enqueue_media();
     
-    // Añadir Thickbox
     add_thickbox();
 
-    // --- Estilos ---
-    // SweetAlert2 CSS
     wp_enqueue_style(
         'sweetalert2-css',
         CRM_EVOLUTION_SENDER_PLUGIN_URL . 'assets/vendor/sweetalert2/sweetalert2.min.css',
         array(),
-        '11.10.6' // Reemplazar con la versión actual de tu librería
+        '11.10.6'
     );
-    // DataTables CSS
-    wp_enqueue_style(
-        'datatables-css',
-        CRM_EVOLUTION_SENDER_PLUGIN_URL . 'assets/vendor/datatables/dataTables.min.css',
-        array(),
-        '1.13.6' // Reemplazar con la versión actual de tu librería
-    );
+
+    if ( in_array($hook, ['crm-evolution_page_crm-evolution-sender-settings', 'crm-evolution_page_crm-evolution-chat-history']) ) {
+        wp_enqueue_style(
+            'datatables-css',
+            CRM_EVOLUTION_SENDER_PLUGIN_URL . 'assets/vendor/datatables/dataTables.min.css',
+            array(), 
+            '1.13.6'
+        );
+    }
 
     wp_enqueue_style(
         'intl-tel-input-css',
-        CRM_EVOLUTION_SENDER_PLUGIN_URL . 'assets/vendor/intl-tel-input/intlTelInput.min.css', // Verifica esta ruta
-        [], // Sin dependencias CSS
-        '17.0.15' // ¡Reemplaza con la versión que descargaste!
+        CRM_EVOLUTION_SENDER_PLUGIN_URL . 'assets/vendor/intl-tel-input/intlTelInput.min.css',
+        [],
+        '17.0.15'
     );
     
     // Estilo Principal del Plugin
     wp_enqueue_style(
         'crm-evolution-sender-style',
         CRM_EVOLUTION_SENDER_PLUGIN_URL . 'assets/style.css',
-        array('thickbox','sweetalert2-css', 'datatables-css', 'intl-tel-input-css'), // Dependencias
+        array('thickbox','sweetalert2-css', 'datatables-css', 'intl-tel-input-css'), 
         CRM_EVOLUTION_SENDER_VERSION
     );
 
     // --- Scripts ---
-    // SweetAlert2 JS
     wp_enqueue_script(
         'sweetalert2-js',
         CRM_EVOLUTION_SENDER_PLUGIN_URL . 'assets/vendor/sweetalert2/sweetalert2.all.min.js',
-        array('jquery'), // Dependencia de jQuery
-        '11.10.6', // Reemplazar con la versión actual
-        true // Cargar en el footer
+        array('jquery'),
+        '11.10.6',
+        true
     );
-    // DataTables JS
-    wp_enqueue_script(
-        'datatables-js',
-        CRM_EVOLUTION_SENDER_PLUGIN_URL . 'assets/vendor/datatables/dataTables.min.js',
-        array('jquery'), // Dependencia de jQuery
-        '1.13.6', // Reemplazar con la versión actual
-        true // Cargar en el footer
-    );
+
+    // Cargar DataTables JS solo si estamos en una página que lo necesite
+    if ( in_array($hook, ['crm-evolution_page_crm-evolution-sender-settings', 'crm-evolution_page_crm-evolution-chat-history']) ) {
+        wp_enqueue_script(
+            'datatables-js',
+            CRM_EVOLUTION_SENDER_PLUGIN_URL . 'assets/vendor/datatables/dataTables.min.js',
+            array('jquery'),
+            '1.13.6',
+            true
+        );
+    }
 
     wp_enqueue_script(
         'intl-tel-input-js',
-        CRM_EVOLUTION_SENDER_PLUGIN_URL . 'assets/vendor/intl-tel-input/intlTelInput.min.js', // Verifica esta ruta
-        ['jquery'], // Depende de jQuery
-        '17.0.15', // ¡Reemplaza con la versión que descargaste!
-        true // Cargar en el footer
+        CRM_EVOLUTION_SENDER_PLUGIN_URL . 'assets/vendor/intl-tel-input/intlTelInput.min.js',
+        ['jquery'],
+        '17.0.15',
+        true
     );
 
-    // Script Principal del Plugin (app.js)
-    wp_enqueue_script(
-        'crm-evolution-sender-appjs',
-        CRM_EVOLUTION_SENDER_PLUGIN_URL . 'assets/app.js',
-        array('jquery', 'thickbox', 'sweetalert2-js', 'datatables-js', 'intl-tel-input-js'), // <-- Añadido 'wp-media'
-        CRM_EVOLUTION_SENDER_VERSION,
-        true // Cargar en el footer
-    );
+    // Cargar app.js solo si estamos en una página que lo necesite (Ajustes, Chat History?)
+    if ( in_array($hook, ['crm-evolution_page_crm-evolution-sender-settings', 'crm-evolution_page_crm-evolution-chat-history']) ) {
+        wp_enqueue_script(
+            'crm-evolution-sender-appjs',
+            CRM_EVOLUTION_SENDER_PLUGIN_URL . 'assets/app.js',
+            array('jquery', 'thickbox', 'sweetalert2-js', 'datatables-js', 'intl-tel-input-js'),
+            CRM_EVOLUTION_SENDER_VERSION,
+            true
+        );
 
-    // Pasar datos de PHP a JavaScript (ej: ajaxurl, nonce, etc.)
-    wp_localize_script( 'crm-evolution-sender-appjs', 'crm_evolution_sender_params', array(
-        'ajax_url' => admin_url( 'admin-ajax.php' ),
-        'nonce'    => wp_create_nonce( 'crm_evolution_sender_nonce' ), // Nonce para seguridad AJAX
-        'utils_script_path' => CRM_EVOLUTION_SENDER_PLUGIN_URL . 'assets/vendor/intl-tel-input/js/utils.js',
-        'i18n' => array(
-            'creatingText' => esc_js( __( 'Creando...', CRM_EVOLUTION_SENDER_TEXT_DOMAIN ) ),
-            // Puedes añadir más cadenas aquí si las necesitas en JS
-            // 'savingText'   => esc_js( __( 'Guardando...', CRM_EVOLUTION_SENDER_TEXT_DOMAIN ) ),
-        )
-    ));
+        // Pasar datos de PHP a JavaScript (ej: ajaxurl, nonce, etc.)
+        wp_localize_script( 'crm-evolution-sender-appjs', 'crm_evolution_sender_params', array(
+            'ajax_url' => admin_url( 'admin-ajax.php' ),
+            'nonce'    => wp_create_nonce( 'crm_evolution_sender_nonce' ),
+            'utils_script_path' => CRM_EVOLUTION_SENDER_PLUGIN_URL . 'assets/vendor/intl-tel-input/js/utils.js',
+            'i18n' => array(
+                'creatingText' => esc_js( __( 'Creando...', CRM_EVOLUTION_SENDER_TEXT_DOMAIN ) ),
+            )
+        ));
+    }
 }
 add_action( 'admin_enqueue_scripts', 'crm_evolution_sender_enqueue_assets' );
+
+
+/**
+ * Encola los scripts y estilos específicos para la página de gestión de Instancias (Cards).
+ *
+ * @param string $hook_suffix El hook de la página actual.
+ */
+function crm_enqueue_instances_page_assets( $hook_suffix ) {
+
+    // Comprobar si estamos en la página principal del plugin (Instancias)
+    if ( 'toplevel_page_crm-evolution-sender-main' === $hook_suffix ) {
+
+        wp_enqueue_style(
+            'crm-admin-instances-style',
+            CRM_EVOLUTION_SENDER_PLUGIN_URL . 'assets/admin-instances.css',
+            array('thickbox', 'sweetalert2-css'),
+            CRM_EVOLUTION_SENDER_VERSION
+        );
+
+        wp_enqueue_script(
+            'crm-admin-instances-script',
+            CRM_EVOLUTION_SENDER_PLUGIN_URL . 'assets/admin-instances.js',
+            array('jquery', 'thickbox', 'sweetalert2-js', 'wp-util'),
+            CRM_EVOLUTION_SENDER_VERSION,
+            true
+        );
+
+        // Localizar datos específicos para el script de instancias
+        wp_localize_script( 'crm-admin-instances-script', 'crmInstancesData', array(
+            'ajax_url' => admin_url( 'admin-ajax.php' ),
+            'nonce'    => wp_create_nonce( 'crm_evolution_sender_nonce' ),
+            'create_instance_nonce' => wp_create_nonce( 'crm_create_instance_action' ),
+            'webhook_url' => esc_url( rest_url( 'crm-evolution-api/v1/webhook' ) ),
+            'i18n'     => array(
+                'confirm_delete' => __( '¿Estás seguro de que quieres eliminar esta instancia?', CRM_EVOLUTION_SENDER_TEXT_DOMAIN ),
+                'error_generic'  => __( 'Ocurrió un error. Por favor, inténtalo de nuevo.', CRM_EVOLUTION_SENDER_TEXT_DOMAIN ),
+                'instance_added' => __( 'Instancia añadida con éxito.', CRM_EVOLUTION_SENDER_TEXT_DOMAIN ),
+                'connecting'     => __( 'Conectando...', CRM_EVOLUTION_SENDER_TEXT_DOMAIN ),
+                'disconnecting'  => __( 'Desconectando...', CRM_EVOLUTION_SENDER_TEXT_DOMAIN ),
+                'deleting'       => __( 'Eliminando...', CRM_EVOLUTION_SENDER_TEXT_DOMAIN ),
+                'generating_qr'  => __( 'Generando QR...', CRM_EVOLUTION_SENDER_TEXT_DOMAIN ),
+                'syncing_contacts' => __( 'Sincronizando contactos...', CRM_EVOLUTION_SENDER_TEXT_DOMAIN ),
+                'sync_contacts_success' => __( 'Sincronización de contactos completada.', CRM_EVOLUTION_SENDER_TEXT_DOMAIN ),
+                'sync_contacts_error' => __( 'Error al sincronizar contactos.', CRM_EVOLUTION_SENDER_TEXT_DOMAIN ),
+            )
+        ));
+    }
+}
+// Asegúrate que esta línea también esté presente después de la definición de la función:
+add_action( 'admin_enqueue_scripts', 'crm_enqueue_instances_page_assets' );
+
 
 /**
  * Encola los scripts y estilos específicos para la pantalla de edición del CPT Campañas.
@@ -226,15 +252,15 @@ function crm_enqueue_campaign_edit_assets( $hook_suffix ) {
                 array(),
                 CRM_EVOLUTION_SENDER_VERSION
             );
-            // Encolar la biblioteca de medios de WP
+            
             wp_enqueue_media();
-            // Encolar el JS específico
+
             wp_enqueue_script(
                 'crm-admin-campaign-js',
                 CRM_EVOLUTION_SENDER_PLUGIN_URL . 'assets/admin-campaign.js',
-                array('jquery'), // Dependencias
+                array('jquery'),
                 CRM_EVOLUTION_SENDER_VERSION,
-                true // Cargar en el footer
+                true
             );
         }
     }
@@ -262,9 +288,8 @@ function crm_evolution_sender_activate() {
         add_option( 'crm_evolution_api_url', 'https://api.percyalvarez.com' );
     }
      if ( false === get_option( 'crm_evolution_api_token' ) ) {
-        add_option( 'crm_evolution_api_token', '' ); // No guardar el token por defecto por seguridad
+        add_option( 'crm_evolution_api_token', '' );
     }
-    // Podrías crear una tabla para guardar las campañas aquí
 }
 register_activation_hook( __FILE__, 'crm_evolution_sender_activate' );
 
@@ -272,8 +297,6 @@ function crm_evolution_sender_deactivate() {
 
 }
 register_deactivation_hook( __FILE__, 'crm_evolution_sender_deactivate' );
-
-
 
 
 /**
@@ -290,9 +313,9 @@ function crm_evolution_use_media_library_avatar( $args, $id_or_email ) {
     if ( is_numeric( $id_or_email ) ) {
         $user_id = (int) $id_or_email;
     } elseif ( is_object( $id_or_email ) && isset( $id_or_email->user_id ) ) {
-        $user_id = (int) $id_or_email->user_id; // Para comentarios
+        $user_id = (int) $id_or_email->user_id;
     } elseif ( is_object( $id_or_email ) && isset( $id_or_email->ID ) ) {
-         $user_id = (int) $id_or_email->ID; // Para WP_User
+         $user_id = (int) $id_or_email->ID;
     } elseif ( is_string( $id_or_email ) && is_email( $id_or_email ) ) {
         $user = get_user_by( 'email', $id_or_email );
         if ( $user ) {
@@ -311,24 +334,18 @@ function crm_evolution_use_media_library_avatar( $args, $id_or_email ) {
     // Si encontramos un ID de adjunto válido
     if ( $attachment_id ) {
         // Obtener la URL de la imagen del tamaño solicitado (o un tamaño razonable)
-        $size = isset( $args['size'] ) ? $args['size'] : 96; // Usar tamaño de args o 96 por defecto
-        $image_data = wp_get_attachment_image_src( $attachment_id, array( $size, $size ) ); // Pedir tamaño cuadrado
-
-        // Si obtuvimos la URL de la imagen
+        $size = isset( $args['size'] ) ? $args['size'] : 96;
+        $image_data = wp_get_attachment_image_src( $attachment_id, array( $size, $size ) );
         if ( $image_data && isset( $image_data[0] ) ) {
-            $args['url'] = $image_data[0]; // Reemplazar la URL por la de nuestra imagen
-            $args['found_avatar'] = true; // Indicar que encontramos un avatar personalizado
-            // Opcional: añadir una clase CSS
-            // $args['class'] = array_merge( (array) $args['class'], array('crm-local-avatar') ); // Anterior
-            // Verificar si 'class' existe antes de hacer merge
+            $args['url'] = $image_data[0];
+            $args['found_avatar'] = true;
             $args['class'] = array_merge( isset($args['class']) ? (array) $args['class'] : array(), array('crm-local-avatar') );
-            // crm_log("Usando avatar local (Attachment ID: {$attachment_id}) para usuario ID {$user_id}.", 'DEBUG');
         } else {
-             crm_log("Se encontró Attachment ID {$attachment_id} para usuario {$user_id}, pero wp_get_attachment_image_src falló.", 'WARN');
+
         }
     }
 
-    return $args; // Devolver los argumentos (modificados o no)
+    return $args;
 }
 add_filter( 'get_avatar_data', 'crm_evolution_use_media_library_avatar', 10, 2 );
 
@@ -338,20 +355,15 @@ add_filter( 'get_avatar_data', 'crm_evolution_use_media_library_avatar', 10, 2 )
  * @param int $user_id ID del usuario que se está eliminando.
  */
 function crm_delete_user_avatar_on_user_delete( $user_id ) {
-    crm_log( "Hook 'delete_user' activado para User ID: {$user_id}. Buscando avatar asociado.", 'INFO' );
-
     // Obtener el ID del adjunto del avatar guardado en los metadatos del usuario
     $attachment_id = get_user_meta( $user_id, '_crm_avatar_attachment_id', true );
 
     if ( ! empty( $attachment_id ) && is_numeric( $attachment_id ) ) {
-        crm_log( "Avatar encontrado (Attachment ID: {$attachment_id}). Intentando eliminarlo permanentemente.", 'INFO' );
-        // Eliminar el adjunto permanentemente (el segundo parámetro true fuerza la eliminación, sin pasar por la papelera)
         $deleted = wp_delete_attachment( $attachment_id, true );
-        crm_log( $deleted ? "Avatar (Attachment ID: {$attachment_id}) eliminado con éxito." : "Fallo al eliminar el avatar (Attachment ID: {$attachment_id}).", $deleted ? 'INFO' : 'ERROR' );
     } else {
-        crm_log( "No se encontró avatar asociado para eliminar para User ID: {$user_id}.", 'INFO' );
+
     }
 }
-add_action( 'delete_user', 'crm_delete_user_avatar_on_user_delete', 10, 1 ); // El 1 indica que la función acepta 1 argumento ($user_id)
+add_action( 'delete_user', 'crm_delete_user_avatar_on_user_delete', 10, 1 );
 
 ?>

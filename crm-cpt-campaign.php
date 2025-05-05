@@ -62,7 +62,7 @@ function crm_register_campaign_cpt() {
     );
 
     register_post_type( 'crm_sender_campaign', $args );
-    crm_log('Custom Post Type "crm_sender_campaign" registrado.');
+    //crm_log('Custom Post Type "crm_sender_campaign" registrado.');
 
 }
 add_action( 'init', 'crm_register_campaign_cpt' );
@@ -117,9 +117,9 @@ function crm_get_active_instances_options() {
             }
         }
     } else {
-        crm_log("Error al obtener instancias para select en CPT: " . (is_wp_error($api_response) ? $api_response->get_error_message() : 'Respuesta inválida'), 'ERROR');
+        //crm_log("Error al obtener instancias para select en CPT: " . (is_wp_error($api_response) ? $api_response->get_error_message() : 'Respuesta inválida'), 'ERROR');
     }
-    crm_log("Instancias activas para select CPT: " . print_r($instances_data, true), 'DEBUG');
+    //crm_log("Instancias activas para select CPT: " . print_r($instances_data, true), 'DEBUG');
     return $instances_data;
 }
 
@@ -134,7 +134,7 @@ function crm_get_etiquetas_options() {
     foreach ($tags as $slug => $name) {
         $options[esc_attr($slug)] = esc_html($name);
     }
-    crm_log("Etiquetas para select CPT: " . print_r($options, true), 'DEBUG');
+    //crm_log("Etiquetas para select CPT: " . print_r($options, true), 'DEBUG');
     return $options;
 }
 
@@ -142,13 +142,32 @@ function crm_get_etiquetas_options() {
  * Añade los meta boxes a la pantalla de edición de campañas.
  */
 function crm_campaign_add_meta_boxes() {
+    // Meta Box Principal (Configuración)
     add_meta_box(
         'crm_campaign_settings',                     // ID único del meta box
         __( 'Configuración de la Campaña', CRM_EVOLUTION_SENDER_TEXT_DOMAIN ), // Título visible del meta box
         'crm_campaign_settings_meta_box_html',       // Función callback que mostrará el HTML
         'crm_sender_campaign',                       // El CPT donde se mostrará
         'normal',                                    // Contexto (normal, side, advanced)
-        'high'                                       // Prioridad (high, core, default, low)
+        'high'                                       // Prioridad
+    );
+    // Meta Box Lateral para Instancias
+    add_meta_box(
+        'crm_campaign_instances_metabox',            // ID único
+        __( 'Instancias de Envío', CRM_EVOLUTION_SENDER_TEXT_DOMAIN ), // Título
+        'crm_campaign_instances_metabox_html',       // Callback HTML
+        'crm_sender_campaign',                       // CPT
+        'side',                                      // Contexto lateral
+        'high'                                       // Prioridad
+    );
+    // Meta Box Lateral para Segmentación (Etiquetas)
+    add_meta_box(
+        'crm_campaign_segmentation_metabox',         // ID único
+        __( 'Segmentación', CRM_EVOLUTION_SENDER_TEXT_DOMAIN ), // Título
+        'crm_campaign_segmentation_metabox_html',    // Callback HTML
+        'crm_sender_campaign',                       // CPT
+        'side',                                      // Contexto lateral
+        'high'                                       // Prioridad
     );
     // Aquí podríamos añadir más meta boxes si quisiéramos separar campos
 }
@@ -163,52 +182,16 @@ function crm_campaign_settings_meta_box_html( $post ) {
     wp_nonce_field( 'crm_save_campaign_meta_box_data', 'crm_campaign_meta_box_nonce' );
 
     // Obtener valores guardados
-    $instance_names = get_post_meta( $post->ID, '_crm_campaign_instance_names', true );
-    $target_tags    = get_post_meta( $post->ID, '_crm_campaign_target_tags', true );
     $interval       = get_post_meta( $post->ID, '_crm_campaign_interval_minutes', true );
     $media_url      = get_post_meta( $post->ID, '_crm_campaign_media_url', true );
     $message_text   = get_post_meta( $post->ID, '_crm_campaign_message_text', true ); // Nuevo meta para el mensaje
 
-    // Asegurarse de que los valores múltiples sean arrays
-    if ( ! is_array( $instance_names ) ) $instance_names = array();
-    if ( ! is_array( $target_tags ) ) $target_tags = array();
-
-    // --- Obtener datos reales para los selects ---
-    $active_instances = crm_get_active_instances_options();
-    $available_tags = crm_get_etiquetas_options();
-
     ?>
     <table class="form-table">
         <tbody>
-            <!-- Instancias -->
-            <tr>
-                <th><label for="crm_campaign_instance_names"><?php _e( 'Instancias a usar (Rotación)', CRM_EVOLUTION_SENDER_TEXT_DOMAIN ); ?></label></th>
-                <td>
-                    <select name="crm_campaign_instance_names[]" id="crm_campaign_instance_names" multiple="multiple" style="min-width: 200px; min-height: 80px;">
-                        <?php foreach ( $active_instances as $name => $label ) : ?>
-                            <option value="<?php echo esc_attr( $name ); ?>" <?php selected( in_array( $name, $instance_names ), true ); ?>>
-                                <?php echo esc_html( $label ); ?>
-                            </option>
-                        <?php endforeach; ?>
-                    </select>
-                    <p class="description"><?php _e( 'Selecciona una o más instancias. El sistema rotará entre ellas para enviar mensajes.', CRM_EVOLUTION_SENDER_TEXT_DOMAIN ); ?></p>
-                </td>
-            </tr>
+            <!-- Los campos de Instancias y Etiquetas se han movido a sus propios meta boxes -->
 
-            <!-- Etiquetas Objetivo -->
-            <tr>
-                <th><label for="crm_campaign_target_tags"><?php _e( 'Etiquetas de Destinatarios', CRM_EVOLUTION_SENDER_TEXT_DOMAIN ); ?></label></th>
-                <td>
-                    <select name="crm_campaign_target_tags[]" id="crm_campaign_target_tags" multiple="multiple" style="min-width: 200px; min-height: 80px;">
-                         <?php foreach ( $available_tags as $slug => $label ) : ?>
-                            <option value="<?php echo esc_attr( $slug ); ?>" <?php selected( in_array( $slug, $target_tags ), true ); ?>>
-                                <?php echo esc_html( $label ); ?>
-                            </option>
-                        <?php endforeach; ?>
-                    </select>
-                    <p class="description"><?php _e( 'Selecciona una o más etiquetas. Se enviará a usuarios que tengan CUALQUIERA de estas etiquetas.', CRM_EVOLUTION_SENDER_TEXT_DOMAIN ); ?></p>
-                </td>
-            </tr>
+            <!-- Los campos restantes permanecen aquí -->
 
              <!-- Intervalo -->
             <tr>
@@ -253,6 +236,63 @@ function crm_campaign_settings_meta_box_html( $post ) {
     <?php
 }
 
+/**
+ * Muestra el HTML para el meta box lateral de selección de instancias.
+ * @param WP_Post $post El objeto del post actual.
+ */
+function crm_campaign_instances_metabox_html( $post ) {
+    // El nonce ya está en el meta box principal, no es necesario repetirlo aquí
+    // si todos los campos se guardan en la misma función 'save_post'.
+
+    $instance_names = get_post_meta( $post->ID, '_crm_campaign_instance_names', true );
+    if ( ! is_array( $instance_names ) ) $instance_names = array();
+    $active_instances = crm_get_active_instances_options();
+    ?>
+    <div class="crm-side-metabox-field">
+        <label for="crm_campaign_instance_names" class="screen-reader-text"><?php _e( 'Instancias a usar (Rotación)', CRM_EVOLUTION_SENDER_TEXT_DOMAIN ); ?></label>
+        <select name="crm_campaign_instance_names[]" id="crm_campaign_instance_names" multiple="multiple" style="width: 100%; min-height: 80px;">
+            <?php if (empty($active_instances)): ?>
+                <option value="" disabled><?php _e('No hay instancias activas', CRM_EVOLUTION_SENDER_TEXT_DOMAIN); ?></option>
+            <?php else: ?>
+                <?php foreach ( $active_instances as $name => $label ) : ?>
+                    <option value="<?php echo esc_attr( $name ); ?>" <?php selected( in_array( $name, $instance_names ), true ); ?>>
+                        <?php echo esc_html( $label ); ?>
+                    </option>
+                <?php endforeach; ?>
+            <?php endif; ?>
+        </select>
+        <p class="description"><?php _e( 'Selecciona una o más instancias. El sistema rotará entre ellas.', CRM_EVOLUTION_SENDER_TEXT_DOMAIN ); ?></p>
+    </div>
+    <?php
+}
+
+/**
+ * Muestra el HTML para el meta box lateral de selección de etiquetas.
+ * @param WP_Post $post El objeto del post actual.
+ */
+function crm_campaign_segmentation_metabox_html( $post ) {
+    $target_tags = get_post_meta( $post->ID, '_crm_campaign_target_tags', true );
+    if ( ! is_array( $target_tags ) ) $target_tags = array();
+    $available_tags = crm_get_etiquetas_options();
+    ?>
+    <div class="crm-side-metabox-field">
+        <label for="crm_campaign_target_tags" class="screen-reader-text"><?php _e( 'Etiquetas de Destinatarios', CRM_EVOLUTION_SENDER_TEXT_DOMAIN ); ?></label>
+        <select name="crm_campaign_target_tags[]" id="crm_campaign_target_tags" multiple="multiple" style="width: 100%; min-height: 80px;">
+            <?php if (empty($available_tags)): ?>
+                <option value="" disabled><?php _e('No hay etiquetas definidas', CRM_EVOLUTION_SENDER_TEXT_DOMAIN); ?></option>
+            <?php else: ?>
+                <?php foreach ( $available_tags as $slug => $label ) : ?>
+                    <option value="<?php echo esc_attr( $slug ); ?>" <?php selected( in_array( $slug, $target_tags ), true ); ?>>
+                        <?php echo esc_html( $label ); ?>
+                    </option>
+                <?php endforeach; ?>
+            <?php endif; ?>
+        </select>
+        <p class="description"><?php _e( 'Enviar a usuarios con CUALQUIERA de estas etiquetas.', CRM_EVOLUTION_SENDER_TEXT_DOMAIN ); ?></p>
+    </div>
+    <?php
+}
+
 // =========================================================================
 // == GUARDAR DATOS DE META BOXES ==
 // =========================================================================
@@ -266,7 +306,7 @@ function crm_save_campaign_meta_box_data( $post_id ) {
 
     // 1. Verificar Nonce
     if ( ! isset( $_POST['crm_campaign_meta_box_nonce'] ) || ! wp_verify_nonce( $_POST['crm_campaign_meta_box_nonce'], 'crm_save_campaign_meta_box_data' ) ) {
-        crm_log("Error al guardar meta de campaña {$post_id}: Nonce inválido.", 'ERROR');
+        //crm_log("Error al guardar meta de campaña {$post_id}: Nonce inválido.", 'ERROR');
         return;
     }
 
@@ -281,7 +321,7 @@ function crm_save_campaign_meta_box_data( $post_id ) {
         return; // Salir si no es nuestro CPT (importante para evitar ejecutar en otros post types)
     }
     if ( ! current_user_can( 'edit_post', $post_id ) ) {
-         crm_log("Error al guardar meta de campaña {$post_id}: Permiso denegado.", 'ERROR');
+         //crm_log("Error al guardar meta de campaña {$post_id}: Permiso denegado.", 'ERROR');
         return;
     }
 
@@ -311,7 +351,7 @@ function crm_save_campaign_meta_box_data( $post_id ) {
     $media_url = isset( $_POST['crm_campaign_media_url'] ) ? esc_url_raw( wp_unslash( $_POST['crm_campaign_media_url'] ) ) : '';
     update_post_meta( $post_id, '_crm_campaign_media_url', $media_url );
 
-    crm_log("Metadatos de campaña guardados para Post ID: {$post_id}", 'INFO');
+    //crm_log("Metadatos de campaña guardados para Post ID: {$post_id}", 'INFO');
 }
 add_action( 'save_post_crm_sender_campaign', 'crm_save_campaign_meta_box_data' );
 
@@ -362,26 +402,26 @@ function crm_handle_campaign_scheduling_on_status_change( $new_status, $old_stat
     }
 
     $post_id = $post->ID;
-    crm_log( "[CRON_SCHEDULER] transition_post_status para Campaña ID: {$post_id}. De '{$old_status}' a '{$new_status}'", 'DEBUG' );
+    //crm_log( "[CRON_SCHEDULER] transition_post_status para Campaña ID: {$post_id}. De '{$old_status}' a '{$new_status}'", 'DEBUG' );
 
     // Limpiar siempre cualquier programación previa al cambiar estado relevante
     $timestamp = wp_next_scheduled( 'crm_process_campaign_batch', array( $post_id ) );
     if ( $timestamp ) {
         wp_unschedule_event( $timestamp, 'crm_process_campaign_batch', array( $post_id ) );
-        crm_log( "[CRON_SCHEDULER][{$post_id}] Tarea cron previa desprogramada.", 'INFO' );
+        //crm_log( "[CRON_SCHEDULER][{$post_id}] Tarea cron previa desprogramada.", 'INFO' );
     }
 
     // Si el NUEVO estado es 'publish', programar la tarea
     if ( $new_status === 'publish' ) {
         wp_schedule_single_event( time() + 5, 'crm_process_campaign_batch', array( $post_id ) ); // +5 segundos para asegurar que el guardado termine
-        crm_log( "[CRON_SCHEDULER][{$post_id}] Estado es 'publish'. Primera ejecución de 'crm_process_campaign_batch' programada.", 'INFO' );
+        //crm_log( "[CRON_SCHEDULER][{$post_id}] Estado es 'publish'. Primera ejecución de 'crm_process_campaign_batch' programada.", 'INFO' );
 
         // Opcional: Resetear contadores al iniciar/reiniciar si viene de un estado no publicado
         if ($old_status !== 'publish') {
              update_post_meta( $post_id, '_crm_campaign_sent_count', 0 );
              update_post_meta( $post_id, '_crm_campaign_failed_count', 0 );
              update_post_meta( $post_id, '_crm_campaign_last_processed_user_id', 0 );
-             crm_log( "[CRON_SCHEDULER][{$post_id}] Contadores reseteados.", 'INFO' );
+             //crm_log( "[CRON_SCHEDULER][{$post_id}] Contadores reseteados.", 'INFO' );
         }
     }
 }
@@ -394,16 +434,16 @@ add_action( 'transition_post_status', 'crm_handle_campaign_scheduling_on_status_
  * @param int $campaign_id ID del post de la campaña a procesar.
  */
 function crm_process_campaign_batch_callback( $campaign_id ) {
-    crm_log( "[CRON] Iniciando procesamiento para Campaña ID: {$campaign_id}", 'INFO' );
+    //crm_log( "[CRON] Iniciando procesamiento para Campaña ID: {$campaign_id}", 'INFO' );
 
     // 1. Obtener datos de la campaña y verificar estado
     $campaign_post = get_post( $campaign_id );
     if ( ! $campaign_post || $campaign_post->post_type !== 'crm_sender_campaign' ) {
-        crm_log( "[CRON][{$campaign_id}] Error: Post no encontrado o no es una campaña.", 'ERROR' );
+        //crm_log( "[CRON][{$campaign_id}] Error: Post no encontrado o no es una campaña.", 'ERROR' );
         return;
     }
     if ( $campaign_post->post_status !== 'publish' ) {
-        crm_log( "[CRON][{$campaign_id}] Campaña no está publicada (estado: {$campaign_post->post_status}). Deteniendo envío.", 'INFO' );
+        //crm_log( "[CRON][{$campaign_id}] Campaña no está publicada (estado: {$campaign_post->post_status}). Deteniendo envío.", 'INFO' );
         // No reprogramar
         return;
     }
@@ -417,7 +457,7 @@ function crm_process_campaign_batch_callback( $campaign_id ) {
     // $instance_names = get_post_meta( $campaign_id, '_crm_campaign_instance_names', true ); // Para rotación futura
 
     if ( empty( $target_tags ) || ! is_array( $target_tags ) ) {
-        crm_log( "[CRON][{$campaign_id}] Error: No hay etiquetas objetivo definidas o el formato es incorrecto.", 'ERROR' );
+        //crm_log( "[CRON][{$campaign_id}] Error: No hay etiquetas objetivo definidas o el formato es incorrecto.", 'ERROR' );
         return; // No podemos continuar sin etiquetas
     }
     $interval_seconds = absint( $interval_minutes ?: 5 ) * 60; // Default 5 min
@@ -468,7 +508,7 @@ function crm_process_campaign_batch_callback( $campaign_id ) {
         );
     }
 
-    crm_log( "[CRON][{$campaign_id}] WP_User_Query Args: " . print_r($user_query_args, true), 'DEBUG' ); // <-- Log Args
+    //crm_log( "[CRON][{$campaign_id}] WP_User_Query Args: " . print_r($user_query_args, true), 'DEBUG' ); // <-- Log Args
 
     // --- Ajuste para 'ID > last_processed_user_id' ---
     // WP_User_Query no soporta 'ID' en meta_query. Usamos el filtro 'pre_get_users'.
@@ -496,12 +536,12 @@ function crm_process_campaign_batch_callback( $campaign_id ) {
 
     $user_query = new WP_User_Query( $user_query_args );
     $next_user = $user_query->get_results();
-    crm_log( "[CRON][{$campaign_id}] WP_User_Query Results: " . print_r($next_user, true), 'DEBUG' ); // <-- Log Results
+    //crm_log( "[CRON][{$campaign_id}] WP_User_Query Results: " . print_r($next_user, true), 'DEBUG' ); // <-- Log Results
 
     // 3. Procesar resultado de la búsqueda
     if ( empty( $next_user ) ) {
         // No hay más usuarios que cumplan los criterios
-        crm_log( "[CRON][{$campaign_id}] No se encontraron más usuarios pendientes (después de ID: {$last_processed_user_id}). Campaña completada.", 'INFO' );
+        //crm_log( "[CRON][{$campaign_id}] No se encontraron más usuarios pendientes (después de ID: {$last_processed_user_id}). Campaña completada.", 'INFO' );
         // Opcional: Marcar campaña como completada en un meta
         // update_post_meta( $campaign_id, '_crm_campaign_status', 'completed' );
         // NO reprogramar
@@ -510,7 +550,7 @@ function crm_process_campaign_batch_callback( $campaign_id ) {
 
     // 4. Tenemos un usuario para procesar
     $user_id_to_process = $next_user[0];
-    crm_log( "[CRON][{$campaign_id}] Procesando siguiente usuario ID: {$user_id_to_process}", 'INFO' );
+    //crm_log( "[CRON][{$campaign_id}] Procesando siguiente usuario ID: {$user_id_to_process}", 'INFO' );
 
     // --- Lógica de envío (simplificada por ahora, usa la primera instancia activa) ---
     $send_result = null;
@@ -524,10 +564,10 @@ function crm_process_campaign_batch_callback( $campaign_id ) {
         $mime_type = $filetype['type'] ?? null;
 
         if ($mime_type) {
-             crm_log( "[CRON][{$campaign_id}] Intentando enviar MEDIA a User ID {$user_id_to_process}. URL: {$media_url}", 'DEBUG' );
+             //crm_log( "[CRON][{$campaign_id}] Intentando enviar MEDIA a User ID {$user_id_to_process}. URL: {$media_url}", 'DEBUG' );
              $send_result = crm_send_whatsapp_media_message( $user_id_to_process, $media_url, $mime_type, $filename, $message_text ); // El texto va como caption
         } else {
-             crm_log( "[CRON][{$campaign_id}] Error: No se pudo determinar el tipo MIME para {$media_url}. No se enviará media.", 'ERROR' );
+             //crm_log( "[CRON][{$campaign_id}] Error: No se pudo determinar el tipo MIME para {$media_url}. No se enviará media.", 'ERROR' );
              $send_result = new WP_Error('mime_error', 'No se pudo determinar el tipo MIME del archivo.');
         }
     } elseif ( ! empty( $message_text ) ) {
@@ -544,21 +584,21 @@ function crm_process_campaign_batch_callback( $campaign_id ) {
         }
         // --- FIN: Reemplazar Placeholders ---
         // Enviar mensaje de texto
-        crm_log( "[CRON][{$campaign_id}] Intentando enviar TEXTO procesado a User ID {$user_id_to_process}.", 'DEBUG' );
+        //crm_log( "[CRON][{$campaign_id}] Intentando enviar TEXTO procesado a User ID {$user_id_to_process}.", 'DEBUG' );
         $send_result = crm_send_whatsapp_message( $user_id_to_process, $processed_message ); // <-- Usar mensaje procesado
     } else {
-         crm_log( "[CRON][{$campaign_id}] Error: No hay ni mensaje ni media URL para enviar.", 'ERROR' );
+         //crm_log( "[CRON][{$campaign_id}] Error: No hay ni mensaje ni media URL para enviar.", 'ERROR' );
          $send_result = new WP_Error('no_content', 'No hay contenido para enviar.');
     }
 
     // 5. Actualizar estado y contadores
     if ( is_wp_error( $send_result ) ) {
-        crm_log( "[CRON][{$campaign_id}] Fallo al enviar a User ID {$user_id_to_process}: " . $send_result->get_error_message(), 'ERROR' );
+        //crm_log( "[CRON][{$campaign_id}] Fallo al enviar a User ID {$user_id_to_process}: " . $send_result->get_error_message(), 'ERROR' );
         // Incrementar contador de fallos
         $failed_count = (int) get_post_meta( $campaign_id, '_crm_campaign_failed_count', true );
         update_post_meta( $campaign_id, '_crm_campaign_failed_count', $failed_count + 1 );
     } else {
-        crm_log( "[CRON][{$campaign_id}] Envío exitoso (o API aceptó) a User ID {$user_id_to_process}.", 'INFO' );
+        //crm_log( "[CRON][{$campaign_id}] Envío exitoso (o API aceptó) a User ID {$user_id_to_process}.", 'INFO' );
         // Incrementar contador de éxitos
         $sent_count = (int) get_post_meta( $campaign_id, '_crm_campaign_sent_count', true );
         update_post_meta( $campaign_id, '_crm_campaign_sent_count', $sent_count + 1 );
@@ -572,9 +612,128 @@ function crm_process_campaign_batch_callback( $campaign_id ) {
     // 6. Reprogramar el siguiente evento
     $next_schedule_time = time() + $interval_seconds;
     wp_schedule_single_event( $next_schedule_time, 'crm_process_campaign_batch', array( $campaign_id ) );
-    crm_log( "[CRON][{$campaign_id}] Siguiente ejecución programada para dentro de {$interval_minutes} minutos.", 'INFO' );
+    //crm_log( "[CRON][{$campaign_id}] Siguiente ejecución programada para dentro de {$interval_minutes} minutos.", 'INFO' );
 
 }
 add_action( 'crm_process_campaign_batch', 'crm_process_campaign_batch_callback', 10, 1 );
+
+// =========================================================================
+// == PERSONALIZAR COLUMNAS EN EL LISTADO DE CAMPAÑAS ==
+// =========================================================================
+
+/**
+ * Añade columnas personalizadas a la tabla de administración de campañas.
+ *
+ * @param array $columns Array existente de columnas.
+ * @return array Array modificado de columnas.
+ */
+function crm_campaign_add_admin_columns( $columns ) {
+    // Guardar la columna 'date' para reinsertarla al final
+    $date_column = $columns['date'];
+    unset( $columns['date'] );
+
+    // Añadir nuevas columnas
+    $columns['crm_status']    = __( 'Estado', CRM_EVOLUTION_SENDER_TEXT_DOMAIN );
+    $columns['crm_tags']      = __( 'Etiquetas', CRM_EVOLUTION_SENDER_TEXT_DOMAIN );
+    $columns['crm_instances'] = __( 'Instancias', CRM_EVOLUTION_SENDER_TEXT_DOMAIN );
+    $columns['crm_progress']  = __( 'Progreso (Enviados/Fallidos)', CRM_EVOLUTION_SENDER_TEXT_DOMAIN );
+    $columns['crm_interval']  = __( 'Intervalo (min)', CRM_EVOLUTION_SENDER_TEXT_DOMAIN );
+
+    // Reinsertar la columna 'date'
+    $columns['date'] = $date_column;
+
+    return $columns;
+}
+add_filter( 'manage_crm_sender_campaign_posts_columns', 'crm_campaign_add_admin_columns' );
+
+/**
+ * Muestra el contenido de las columnas personalizadas en la tabla de administración.
+ *
+ * @param string $column_name El nombre de la columna actual.
+ * @param int    $post_id     El ID del post actual.
+ */
+function crm_campaign_render_admin_columns( $column_name, $post_id ) {
+    switch ( $column_name ) {
+        case 'crm_status':
+            $post_status = get_post_status( $post_id );
+            $campaign_status = get_post_meta( $post_id, '_crm_campaign_status', true ); // Podríamos usar este meta en el futuro
+            $next_scheduled = wp_next_scheduled( 'crm_process_campaign_batch', array( $post_id ) );
+
+            if ( $post_status === 'publish' ) {
+                if ( $next_scheduled ) {
+                    echo '<span style="color: orange;">' . esc_html__( 'Enviando', CRM_EVOLUTION_SENDER_TEXT_DOMAIN ) . '</span>';
+                } else {
+                    // Si está publicada pero no hay próxima tarea, podría estar completada o pausada
+                    // Necesitaríamos el meta '_crm_campaign_status' para diferenciar mejor
+                    echo '<span style="color: green;">' . esc_html__( 'Publicada (¿Completada?)', CRM_EVOLUTION_SENDER_TEXT_DOMAIN ) . '</span>';
+                }
+            } elseif ( $post_status === 'draft' ) {
+                echo '<span style="color: gray;">' . esc_html__( 'Borrador', CRM_EVOLUTION_SENDER_TEXT_DOMAIN ) . '</span>';
+            } elseif ( $post_status === 'pending' ) {
+                 echo '<span style="color: blue;">' . esc_html__( 'Pendiente', CRM_EVOLUTION_SENDER_TEXT_DOMAIN ) . '</span>';
+            } else {
+                echo esc_html( ucfirst( $post_status ) );
+            }
+            break;
+
+        case 'crm_tags':
+            $tags = get_post_meta( $post_id, '_crm_campaign_target_tags', true );
+            if ( ! empty( $tags ) && is_array( $tags ) ) {
+                // Opcional: Obtener nombres legibles de las etiquetas si es necesario
+                echo esc_html( implode( ', ', $tags ) );
+            } else {
+                echo '—';
+            }
+            break;
+
+        case 'crm_instances':
+            $instances = get_post_meta( $post_id, '_crm_campaign_instance_names', true );
+            if ( ! empty( $instances ) && is_array( $instances ) ) {
+                echo esc_html( implode( ', ', $instances ) );
+            } else {
+                echo '—';
+            }
+            break;
+
+        case 'crm_progress':
+            $sent_count = (int) get_post_meta( $post_id, '_crm_campaign_sent_count', true );
+            $failed_count = (int) get_post_meta( $post_id, '_crm_campaign_failed_count', true );
+            echo sprintf( '%d / %d', $sent_count, $failed_count );
+            break;
+
+        case 'crm_interval':
+            $interval = get_post_meta( $post_id, '_crm_campaign_interval_minutes', true );
+            echo esc_html( $interval ?: 'N/A' );
+            break;
+    }
+}
+add_action( 'manage_crm_sender_campaign_posts_custom_column', 'crm_campaign_render_admin_columns', 10, 2 );
+
+// =========================================================================
+// == MEJORAS UI EN PANTALLA DE EDICIÓN ==
+// =========================================================================
+
+/**
+ * Añade un botón "Volver al Listado" al meta box de Publicar.
+ *
+ * @param WP_Post $post El objeto del post actual.
+ */
+function crm_add_back_to_list_button_to_publish_box( $post ) {
+    // Asegurarse de que estamos en el CPT correcto
+    if ( 'crm_sender_campaign' !== $post->post_type ) {
+        return;
+    }
+
+    // Obtener la URL del listado
+    $list_url = admin_url( 'edit.php?post_type=crm_sender_campaign' );
+
+    // Generar el botón/enlace dentro de una sección misc
+    echo '<div class="misc-pub-section misc-pub-back-to-list" style="padding-top: 5px; padding-bottom: 5px;">'; // Añadir algo de padding
+    echo '<span class="dashicons dashicons-arrow-left-alt" style="vertical-align:middle; margin-right: 3px;"></span>';
+    echo '<a href="' . esc_url( $list_url ) . '" class="button button-secondary button-small">' . esc_html__( 'Volver al Listado', CRM_EVOLUTION_SENDER_TEXT_DOMAIN ) . '</a>';
+    echo '</div>';
+}
+add_action( 'post_submitbox_misc_actions', 'crm_add_back_to_list_button_to_publish_box', 10, 1 );
+
 
 ?>
