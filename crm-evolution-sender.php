@@ -25,10 +25,10 @@ define( 'CRM_EVOLUTION_SENDER_TEXT_DOMAIN', 'crm-evolution-sender' );
 
 // --- Archivos Requeridos ---
 // require_once CRM_EVOLUTION_SENDER_PLUGIN_DIR . 'crm-main.php';
-require_once CRM_EVOLUTION_SENDER_PLUGIN_DIR . 'crm-instances.php';
 require_once CRM_EVOLUTION_SENDER_PLUGIN_DIR . 'crm-setting.php';
 require_once CRM_EVOLUTION_SENDER_PLUGIN_DIR . 'crm-ajax-handlers.php';
 require_once CRM_EVOLUTION_SENDER_PLUGIN_DIR . 'crm-rest-api.php';
+require_once CRM_EVOLUTION_SENDER_PLUGIN_DIR . 'crm-instances.php'; // <-- Movido después de crm-rest-api.php
 require_once CRM_EVOLUTION_SENDER_PLUGIN_DIR . 'crm-cpt-chat.php';
 require_once CRM_EVOLUTION_SENDER_PLUGIN_DIR . 'crm-cpt-campaign.php';
 require_once CRM_EVOLUTION_SENDER_PLUGIN_DIR . 'crm-chat-history.php';

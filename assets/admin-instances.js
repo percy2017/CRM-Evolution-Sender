@@ -314,11 +314,70 @@
         });
 
         $cardsContainer.on('click', '.btn-sync-contacts', function() {
-            // Lógica para sincronizar contactos
-            // ... (Implementación pendiente si es necesario) ...
-             console.warn('Funcionalidad Sincronizar Contactos pendiente de implementar');
-        });
+            const $button = $(this);
+            const $card = $button.closest('.instance-card');
+            const instanceName = $card.data('instance-name');
+            const $icon = $button.find('.dashicons');
 
+            if (!instanceName) return;
+
+            console.log(`Solicitando confirmación para sincronizar contactos de: ${instanceName}`);
+
+            // *** INICIO: Añadir SweetAlert de confirmación ***
+            Swal.fire({
+                title: '¿Iniciar Sincronización?',
+                text: `Se buscarán contactos en la instancia "${instanceName}" y se crearán o actualizarán en WordPress. Esto puede tardar si hay muchos contactos nuevos (los avatares se procesarán en segundo plano).`,
+                icon: 'question',
+                showCancelButton: true,
+                confirmButtonColor: '#3085d6',
+                cancelButtonColor: '#aaa',
+                confirmButtonText: 'Sí, ¡Sincronizar!',
+                cancelButtonText: 'Cancelar'
+            }).then((result) => {
+                if (result.isConfirmed) {
+                    console.log(`Confirmada sincronización de contactos para: ${instanceName}`);
+
+                    // Mostrar indicador de carga
+                    $button.prop('disabled', true);
+                    $icon.removeClass('dashicons-admin-users').addClass('dashicons-update spin');
+
+                    // Llamar a la acción AJAX
+                    $.ajax({
+                        url: crmInstancesData.ajax_url,
+                        type: 'POST',
+                        data: {
+                            action: 'crm_sync_instance_contacts',
+                            _ajax_nonce: crmInstancesData.nonce,
+                            instance_name: instanceName
+                        },
+                        success: function(response) {
+                            if (response.success) {
+                                Swal.fire(
+                                    '¡Iniciado!', // Cambiado de 'Sincronizado' a 'Iniciado'
+                                    response.data.message || `La sincronización de ${instanceName} ha comenzado.`,
+                                    'success'
+                                );
+                            } else {
+                                Swal.fire('Error', response.data.message || crmInstancesData.i18n.error_generic, 'error');
+                            }
+                        },
+                        error: function(jqXHR) {
+                            Swal.fire('Error de Conexión', jqXHR.responseJSON?.data?.message || crmInstancesData.i18n.error_generic, 'error');
+                        },
+                        complete: function() {
+                            // Restaurar botón
+                            $button.prop('disabled', false);
+                            $icon.removeClass('dashicons-update spin').addClass('dashicons-admin-users');
+                        }
+                    });
+                } else {
+                    console.log(`Sincronización de ${instanceName} cancelada por el usuario.`);
+                    // No es necesario restaurar el botón aquí porque no se deshabilitó
+                }
+            });
+            // *** FIN: Añadir SweetAlert de confirmación ***
+        });
+        
         // --- Event Listener para cerrar el modal QR ---
         $('#close-qr-modal').on('click', function() {
             $('#qr-code-modal').hide();
