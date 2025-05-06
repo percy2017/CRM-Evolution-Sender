@@ -171,7 +171,7 @@ function crm_evolution_sender_enqueue_assets( $hook ) {
         // Pasar datos de PHP a JavaScript (ej: ajaxurl, nonce, etc.)
         wp_localize_script( 'crm-evolution-sender-appjs', 'crm_evolution_sender_params', array(
             'ajax_url' => admin_url( 'admin-ajax.php' ),
-            'nonce'    => wp_create_nonce( 'crm_evolution_sender_nonce' ),
+            'nonce'    => wp_create_nonce( 'crm_evolution_sender_nonce' ), // <-- Volver al nonce original
             'utils_script_path' => CRM_EVOLUTION_SENDER_PLUGIN_URL . 'assets/vendor/intl-tel-input/js/utils.js',
             'i18n' => array(
                 'creatingText' => esc_js( __( 'Creando...', CRM_EVOLUTION_SENDER_TEXT_DOMAIN ) ),
@@ -365,5 +365,49 @@ function crm_delete_user_avatar_on_user_delete( $user_id ) {
     }
 }
 add_action( 'delete_user', 'crm_delete_user_avatar_on_user_delete', 10, 1 );
+
+// =========================================================================
+// == PERSONALIZAR COLUMNAS EN LISTA DE USUARIOS WP ==
+// =========================================================================
+
+/**
+ * Añade las columnas 'Teléfono' y 'Etiqueta' a la tabla de usuarios de WP.
+ *
+ * @param array $columns Columnas existentes.
+ * @return array Columnas modificadas.
+ */
+function crm_add_user_list_columns( $columns ) {
+    // Insertar Teléfono después de 'email'
+    $new_columns = array();
+    foreach ( $columns as $key => $value ) {
+        $new_columns[$key] = $value;
+        if ( $key === 'email' ) {
+            $new_columns['crm_phone'] = __( 'Teléfono', CRM_EVOLUTION_SENDER_TEXT_DOMAIN );
+            $new_columns['crm_tag'] = __( 'Etiqueta', CRM_EVOLUTION_SENDER_TEXT_DOMAIN );
+        }
+    }
+    return $new_columns;
+}
+add_filter( 'manage_users_columns', 'crm_add_user_list_columns' );
+
+/**
+ * Muestra el contenido para las columnas personalizadas en la tabla de usuarios.
+ *
+ * @param mixed  $value       Valor por defecto (vacío para columnas personalizadas).
+ * @param string $column_name Nombre de la columna actual.
+ * @param int    $user_id     ID del usuario actual.
+ * @return mixed Contenido a mostrar en la celda.
+ */
+function crm_render_user_list_columns( $value, $column_name, $user_id ) {
+    if ( 'crm_phone' === $column_name ) {
+        return esc_html( get_user_meta( $user_id, 'billing_phone', true ) ?: '—' );
+    } elseif ( 'crm_tag' === $column_name ) {
+        $tag_key = get_user_meta( $user_id, '_crm_lifecycle_tag', true );
+        $all_tags = function_exists('crm_get_lifecycle_tags') ? crm_get_lifecycle_tags() : array();
+        return esc_html( isset( $all_tags[$tag_key] ) ? $all_tags[$tag_key] : ( $tag_key ?: '—' ) );
+    }
+    return $value; // Devolver valor por defecto para otras columnas
+}
+add_filter( 'manage_users_custom_column', 'crm_render_user_list_columns', 10, 3 );
 
 ?>

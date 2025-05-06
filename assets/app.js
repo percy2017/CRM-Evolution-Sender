@@ -731,8 +731,8 @@
                 $selectElement.empty().append('<option value="">-- Sin Etiqueta --</option>'); // Opción por defecto
                 if (tags && tags.length > 0) {
                     tags.forEach(tag => {
-                        const $option = $('<option>', { value: tag.value, text: tag.text });
-                        if (tag.value === selectedKey) {
+                        const $option = $('<option>', { value: tag.key, text: tag.name }); // <-- Usar key y name
+                        if (tag.key === selectedKey) {
                             $option.prop('selected', true);
                         }
                         $selectElement.append($option);

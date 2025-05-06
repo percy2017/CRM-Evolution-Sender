@@ -1184,3 +1184,40 @@ function crm_save_contact_details_callback() {
     wp_send_json_success( array( 'message' => 'Contacto actualizado correctamente.' ) );
 }
 add_action( 'wp_ajax_crm_save_contact_details', 'crm_save_contact_details_callback' );
+
+/**
+ * AJAX Handler para obtener las etiquetas de ciclo de vida formateadas para un select en JS.
+ * Llamado desde app.js para el sidebar de detalles del contacto.
+ */
+function crm_get_etiquetas_for_select_callback() {
+    //crm_log( 'Recibida petición AJAX: crm_get_etiquetas_for_select' );
+
+    // 1. Verificar Nonce y Permisos
+    check_ajax_referer( 'crm_evolution_sender_nonce', '_ajax_nonce' ); // <-- Volver al nonce original
+    if ( ! current_user_can( 'edit_posts' ) ) { // Capacidad para ver chats/usuarios
+        //crm_log( 'Error AJAX: Permiso denegado para crm_get_etiquetas_for_select.', 'ERROR' );
+        wp_send_json_error( array( 'message' => 'No tienes permisos suficientes.' ), 403 );
+    }
+
+    // 2. Obtener las etiquetas
+    // Asegurarse de que la función exista (debería estar en crm-setting.php)
+    if ( ! function_exists( 'crm_get_lifecycle_tags' ) ) {
+        //crm_log( 'Error AJAX: La función crm_get_lifecycle_tags no existe.', 'ERROR' );
+        wp_send_json_error( array( 'message' => 'Error interno del servidor (función no encontrada).' ), 500 );
+    }
+    $tags_assoc = crm_get_lifecycle_tags(); // Devuelve [key => name]
+
+    // 3. Formatear para el select de JS (array de objetos)
+    $tags_formatted = array();
+    foreach ( $tags_assoc as $key => $name ) {
+        $tags_formatted[] = array(
+            'key'  => $key,
+            'name' => $name,
+        );
+    }
+
+    //crm_log( "Enviando " . count($tags_formatted) . " etiquetas formateadas para select.", 'INFO' );
+    wp_send_json_success( $tags_formatted );
+
+}
+add_action( 'wp_ajax_crm_get_etiquetas_for_select', 'crm_get_etiquetas_for_select_callback' );
