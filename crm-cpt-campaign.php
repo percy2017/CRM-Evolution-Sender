@@ -282,12 +282,12 @@ function crm_campaign_send_whatsapp_media_message( $user_id, $attachment_url, $f
     $endpoint = "/message/sendMedia/{$active_instance_name}";
     $body = array(
         'number'        => $recipient_jid,
-        'options'       => array( 'delay' => 1200, 'composing' => 'uploading' ), // Simular subida
+        'options'       => array( 'delay' => 1200, 'presence' => 'composing' ),
         'mediaMessage'  => array(
             'mediatype' => $media_type,
-            'media'     => $attachment_url, // <-- Usar la URL directamente
+            'media'     => $attachment_url,
             'caption'   => $caption,
-            'fileName'  => $filename ?: basename( $attachment_url ), // <-- Corregido a fileName
+            'fileName'  => $filename ?: basename( $attachment_url ),
         ),
     );
     error_log("[crm_campaign_send_whatsapp_media_message] Endpoint y Body definidos para API: Endpoint='{$endpoint}', Body Keys: " . implode(', ', array_keys($body)));

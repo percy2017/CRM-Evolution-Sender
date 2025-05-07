@@ -375,6 +375,11 @@
     border-radius: 5px; /* Bordes redondeados para media */
     margin-bottom: 5px; /* Espacio si hay caption */
 }
+    /* Hacer que las imágenes en el chat parezcan clicables */
+    .crm-chat-history-page .message-media img {
+        cursor: zoom-in; /* O 'pointer' */
+    }
+
 
 .crm-chat-history-page .message-caption {
     margin-top: 5px;
@@ -581,4 +586,105 @@
     padding: 8px;
     border: 1px solid #ccd0d4;
     box-sizing: border-box; /* Incluir padding y borde en el ancho */
+}
+
+/* --- Estilos para Detalles de Última Compra en Sidebar de Chat --- */
+.crm-chat-history-page .contact-details-content .last-purchase-details {
+    font-size: 0.9em;      /* Tamaño de fuente ligeramente más pequeño */
+    line-height: 1.6;      /* Espaciado entre líneas */
+    background-color: #f9f9f9; /* Fondo sutil para agrupar visualmente */
+    padding: 10px;         /* Espaciado interno */
+    border-radius: 4px;    /* Bordes redondeados */
+    border: 1px solid #eee; /* Borde ligero */
+}
+
+.crm-chat-history-page .contact-details-content .last-purchase-details p {
+    margin: 0 0 6px 0;     /* Espacio debajo de cada línea de información */
+    color: #333;           /* Color de texto principal */
+}
+
+.crm-chat-history-page .contact-details-content .last-purchase-details p:last-child {
+    margin-bottom: 0;      /* Sin margen inferior para el último párrafo */
+}
+
+.crm-chat-history-page .contact-details-content .last-purchase-details strong {
+    color: #1d2327;        /* Color más oscuro para las etiquetas "ID Orden:", "Fecha:", etc. */
+}
+
+.crm-chat-history-page .contact-details-content .order-status-badge {
+    padding: 3px 7px;      /* Padding del badge */
+    border-radius: 3px;    /* Bordes redondeados del badge */
+    background-color: #e0e0e0; /* Color de fondo del badge (puedes ajustarlo según el estado si lo deseas) */
+    font-size: 0.9em;      /* Tamaño de fuente del badge */
+    display: inline-block; /* Para que el padding y background se apliquen correctamente */
+    font-weight: 500;      /* Peso de fuente para el badge */
+}
+
+/* Estilos para el popup de imagen maximizada de SweetAlert2 (opcional) */
+.swal2-image-popup .swal2-image {
+    max-height: 85vh; /* Limitar altura máxima de la imagen en el popup */
+    object-fit: contain; /* Asegurar que toda la imagen sea visible */
+}
+
+.swal2-image-popup .swal2-close { /* Estilo del botón de cerrar si es necesario */
+    color: #fff; /* Ejemplo: hacerlo blanco si el fondo es oscuro */
+    /* Puedes añadir más estilos aquí */
+}
+
+/* ==========================================================================
+   ESTILOS para Vista Ampliada del Avatar en Detalles del Contacto
+   ========================================================================== */
+
+.crm-chat-history-page .contact-details-column { /* Cambiado de .contact-details-content a .contact-details-column */
+    position: relative; /* Necesario para posicionar la vista ampliada dentro */
+}
+
+.crm-chat-history-page .contact-avatar-expanded-view {
+    position: absolute; /* Se superpone al contenido normal */
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-color: rgba(255, 255, 255, 0.98); /* Fondo blanco casi opaco */
+    z-index: 10; /* Por encima del contenido normal del sidebar */
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+    box-sizing: border-box;
+    /* display: none; ya está inline, pero es bueno tenerlo aquí para referencia */
+}
+
+.crm-chat-history-page .contact-avatar-expanded-view #expanded-avatar-image {
+    max-width: 80%; /* Que no ocupe todo el ancho, deja algo de espacio */
+    max-height: 70%; /* Limita la altura para que quepan los botones */
+    width: auto; /* Mantiene la proporción */
+    height: auto; /* Mantiene la proporción */
+    object-fit: contain; /* Asegura que toda la imagen sea visible */
+    border-radius: 50%; /* Puede ser redondo o cuadrado, según preferencia */
+    margin-bottom: 20px;
+    box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+}
+
+.crm-chat-history-page .contact-avatar-expanded-view .expanded-avatar-actions {
+    text-align: center;
+}
+
+.crm-chat-history-page .contact-avatar-expanded-view .close-expanded-avatar-button {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    background: none;
+    border: none;
+    color: #50575e;
+    cursor: pointer;
+    padding: 5px;
+    line-height: 1;
+}
+
+.crm-chat-history-page .contact-avatar-expanded-view .close-expanded-avatar-button .dashicons {
+    font-size: 24px;
+    width: 24px;
+    height: 24px;
 }

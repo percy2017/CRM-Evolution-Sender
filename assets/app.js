@@ -355,10 +355,10 @@
             dataType: 'json', // Esperamos una respuesta JSON del servidor
             beforeSend: function() {
                 // Mostrar algún indicador de carga si es necesario
-                 Swal.showLoading(); // Usar el loading de SweetAlert
+                //  Swal.showLoading(); // Usar el loading de SweetAlert
             },
             success: function(response) {
-                 Swal.close(); // Ocultar loading
+                //  Swal.close(); // Ocultar loading
                 crm_js_log(`Respuesta AJAX para ${action}:`, 'DEBUG', response);
                 if (response && response.success) {
                     if (onSuccess && typeof onSuccess === 'function') {
@@ -686,10 +686,14 @@
         // Guardar datos actuales antes de reemplazar
         const currentData = {
             name: $detailsContainer.find('label:contains("Nombre:")').next('span').text(),
+            firstName: $detailsContainer.find('label:contains("Nombres:")').next('span').text(), // Nuevo
+            lastName: $detailsContainer.find('label:contains("Apellidos:")').next('span').text(), // Nuevo
             phone: $detailsContainer.find('label:contains("Teléfono:")').next('span').text(),
             email: $detailsContainer.find('label:contains("Email:")').next('span').text(),
             tagKey: $detailsContainer.find('label:contains("Etiqueta:")').next('span.tag-badge').data('tag-key'),
-            notes: $detailsContainer.find('.contact-notes').html().replace(/<br\s*\/?>/gi, '\n').replace(/<i>Sin notas<\/i>/i, '').trim() // Convertir <br> a \n y quitar placeholder
+            notes: $detailsContainer.find('.contact-notes-content').html().replace(/<br\s*\/?>/gi, '\n').replace(/<i>Sin notas<\/i>/i, '').trim() // Convertir <br> a \n y quitar placeholder
+            // Rol y Fecha de Registro no son editables aquí
+            // Historial de WooCommerce no es editable
         };
         crm_js_log('Datos actuales para edición:', 'DEBUG', currentData);
 
@@ -697,6 +701,8 @@
         $detailsContainer.find('label:contains("Nombre:")').next('span').replaceWith(`<input type="text" id="edit-contact-name" class="regular-text" value="${escapeHtml(currentData.name)}">`);
         $detailsContainer.find('label:contains("Teléfono:")').nextAll().remove(); // Quitar span y small(JID)
         $detailsContainer.find('label:contains("Teléfono:")').after(`<input type="text" id="edit-contact-phone" class="regular-text" value="${escapeHtml(currentData.phone)}" readonly title="El teléfono se sincroniza desde WhatsApp, no se puede editar aquí.">`); // Teléfono no editable
+        $detailsContainer.find('label:contains("Nombres:")').next('span').replaceWith(`<input type="text" id="edit-contact-first-name" class="regular-text" value="${escapeHtml(currentData.firstName)}">`);
+        $detailsContainer.find('label:contains("Apellidos:")').next('span').replaceWith(`<input type="text" id="edit-contact-last-name" class="regular-text" value="${escapeHtml(currentData.lastName)}">`);
         $detailsContainer.find('label:contains("Email:")').next('span').replaceWith(`<input type="email" id="edit-contact-email" class="regular-text" value="${escapeHtml(currentData.email)}">`);
 
         // Reemplazar span de etiqueta con un select (requiere cargar etiquetas)
@@ -707,7 +713,7 @@
         loadTagsIntoSelect($tagSelect, currentData.tagKey); // Nueva función auxiliar
 
         // Reemplazar div de notas con textarea
-        $detailsContainer.find('.contact-notes').replaceWith(`<textarea id="edit-contact-notes" class="large-text" rows="4">${escapeHtml(currentData.notes)}</textarea>`);
+        $detailsContainer.find('.contact-notes-content').replaceWith(`<textarea id="edit-contact-notes" class="large-text" rows="4">${escapeHtml(currentData.notes)}</textarea>`);
 
         // Cambiar botones
         const $buttonContainer = $detailsContainer.find('div[style*="text-align: right"]');
@@ -755,6 +761,8 @@
         const updatedData = {
             user_id: userId,
             name: $('#edit-contact-name').val(),
+            first_name: $('#edit-contact-first-name').val(), // Nuevo
+            last_name: $('#edit-contact-last-name').val(),   // Nuevo
             email: $('#edit-contact-email').val(),
             tag_key: $('#edit-contact-tag').val(),
             notes: $('#edit-contact-notes').val()
@@ -1032,10 +1040,173 @@
                 loadContactDetails(userId); // Simplemente recargar los detalles originales
             });
             // --- FIN: Listener para el botón Editar Contacto ---
+            // DENTRO de $(document).ready(function() { ... })
+            // Y DENTRO de if ($('#crm-chat-container').length) { ... }
+            
+                // --- INICIO: Listener para maximizar imágenes del chat ---
+                $('#chat-messages-area').on('click', '.message-media img', function(event) {
+                    event.preventDefault(); // Prevenir comportamiento por defecto si la imagen está en un enlace
+                    const imageUrl = $(this).attr('src');
+                    const imageAlt = $(this).attr('alt') || 'Imagen del chat';
+            
+                    if (imageUrl) {
+                        crm_js_log(`Maximizando imagen: ${imageUrl}`, 'DEBUG');
+                        Swal.fire({
+                            imageUrl: imageUrl,
+                            imageAlt: imageAlt,
+                            imageWidth: '90%', // O un tamaño específico como 800
+                            imageHeight: 'auto',
+                            animation: false, // Opcional: quitar animación de SweetAlert
+                            showConfirmButton: false, // No necesitamos botón de confirmar
+                            showCloseButton: true, // Mostrar botón de cerrar
+                            backdrop: `
+                                rgba(0,0,0,0.6)
+                            `,
+                            customClass: { // Clases personalizadas para más estilo si es necesario
+                                popup: 'swal2-image-popup', // Para el contenedor del modal
+                                image: 'swal2-maximized-image' // Para la imagen misma
+                            }
+                        });
+                    }
+                });
+                crm_js_log('Listener para maximizar imágenes del chat inicializado.', 'INFO');
+                // --- FIN: Listener para maximizar imágenes del chat ---
+            
+            // --- INICIO: Lógica para Vista Ampliada y Actualización de Avatar ---
+            let avatarMediaFrame; // Para el selector de medios del avatar
+            let currentEditingAvatarUserId = null; // Para saber a qué usuario pertenece el avatar que se está editando/viendo
+
+            // 1. Listener para click en el avatar pequeño (delegado desde #contact-details-content)
+            $('#contact-details-content').on('click', '.contact-details-avatar', function() {
+                const $avatar = $(this);
+                const avatarUrl = $avatar.attr('src');
+
+                // El avatar en el que se hace clic pertenece al chat actualmente abierto
+                if (!currentOpenChatUserId) {
+                    crm_js_log('No se pudo determinar el User ID para mostrar el avatar ampliado (currentOpenChatUserId nulo).', 'ERROR');
+                    showNotification('Error', 'error', 'No se pudo identificar al usuario.');
+                    return;
+                }
+                currentEditingAvatarUserId = currentOpenChatUserId;
+
+                $('#expanded-avatar-image').attr('src', avatarUrl);
+                $('#contact-avatar-expanded-view').fadeIn(200);
+                crm_js_log(`Mostrando vista ampliada de avatar para User ID: ${currentEditingAvatarUserId}`);
+            });
+
+            // 2. Listener para cerrar la vista ampliada del avatar
+            // Usar delegación en document por si el botón está dentro de un div que se muestra/oculta
+            $(document).on('click', '#close-avatar-expanded-view', function() {
+                $('#contact-avatar-expanded-view').fadeOut(200);
+                currentEditingAvatarUserId = null; // Limpiar el ID del usuario
+                crm_js_log('Vista ampliada de avatar cerrada.');
+            });
+
+            // 3. Listener para el botón "Actualizar foto" en la vista ampliada
+            $(document).on('click', '#trigger-update-avatar-button', function() {
+                if (!currentEditingAvatarUserId) {
+                    crm_js_log('Error: No hay User ID (currentEditingAvatarUserId) para actualizar avatar.', 'ERROR');
+                    showNotification('Error', 'error', 'No se pudo identificar al usuario para actualizar la foto.');
+                    return;
+                }
+
+                // Si el frame ya existe, ábrelo.
+                if (avatarMediaFrame) {
+                    avatarMediaFrame.open();
+                    return;
+                }
+
+                // Crear el frame de medios.
+                avatarMediaFrame = wp.media({
+                    title: 'Seleccionar o Subir Nueva Foto de Perfil',
+                    button: {
+                        text: 'Usar esta imagen'
+                    },
+                    multiple: false,
+                    library: {
+                        type: 'image' // Solo permitir seleccionar imágenes
+                    }
+                });
+
+                // Cuando se selecciona un archivo.
+                avatarMediaFrame.on('select', function() {
+                    const attachment = avatarMediaFrame.state().get('selection').first().toJSON();
+                    crm_js_log('Nueva imagen de avatar seleccionada:', 'DEBUG', attachment);
+
+                    if (!attachment.id || !attachment.url) {
+                        crm_js_log('Error: El adjunto seleccionado no tiene ID o URL.', 'ERROR');
+                        showNotification('Error', 'error', 'El archivo seleccionado no es válido.');
+                        return;
+                    }
+
+                    // Llamar a AJAX para actualizar el avatar
+                    performAjaxRequest(
+                        'crm_update_contact_avatar', // Acción PHP que creamos
+                        {
+                            user_id: currentEditingAvatarUserId,
+                            attachment_id: attachment.id // Enviar el ID del adjunto
+                        },
+                        function(response) { // onSuccess
+                            crm_js_log('Avatar actualizado con éxito. Respuesta:', 'INFO', response);
+                            showNotification('Foto de perfil actualizada', 'success');
+
+                            // Actualizar la imagen en la vista ampliada
+                            $('#expanded-avatar-image').attr('src', response.new_avatar_url);
+
+                            // Actualizar el avatar pequeño en el sidebar de detalles del contacto
+                            $('#contact-details-content .contact-details-avatar').attr('src', response.new_avatar_url);
+
+                            // Actualizar el avatar en la lista de chats si el usuario está allí
+                            const $chatListItem = $(`.chat-list-item[data-user-id="${currentEditingAvatarUserId}"]`);
+                            if ($chatListItem.length) {
+                                $chatListItem.find('.chat-avatar').attr('src', response.new_avatar_url);
+                            }
+                            // No cerramos la vista ampliada automáticamente, el usuario puede querer verla o cerrarla manualmente.
+                        }
+                        // onError es manejado por performAjaxRequest
+                    );
+                });
+                // Abrir el frame.
+                avatarMediaFrame.open();
+            });
+            crm_js_log('Listeners para la vista ampliada y actualización de avatar inicializados.');
+            // --- FIN: Lógica para Vista Ampliada y Actualización de Avatar ---
+
+            // --- INICIO: Cerrar sidebar de detalles al enfocar input de mensaje ---
+            $('#chat-message-input').on('focus', function() {
+                crm_js_log('Input de mensaje ha obtenido el foco. Intentando cerrar sidebar de detalles.');
+                closeContactDetailsSidebar(); // Esta función ya existe y maneja la lógica de cierre
+            });
+            crm_js_log('Listener para cerrar sidebar al enfocar input de mensaje inicializado.');
+            // --- FIN: Cerrar sidebar de detalles al enfocar input de mensaje ---
+
         } else {
             crm_js_log('Contenedor #crm-chat-container NO encontrado. Lógica de chat no se ejecutará.', 'WARN');
         }
         // *** FIN PRUEBA DEPURACIÓN GLOBAL DE CLICS ***
+
+        /**
+         * =========================================================================
+         * == SIDEBAR DE DETALLES DEL CONTACTO (Funciones) ==
+         * =========================================================================
+         */
+
+        /**
+         * Cierra (oculta) el sidebar de detalles del contacto.
+         */
+        function closeContactDetailsSidebar() {
+            const $ = jQuery;
+            const $contactDetailsColumn = $('#contact-details-column');
+
+            if ($contactDetailsColumn.css('display') !== 'none') { // Solo actuar si está visible
+                crm_js_log('Cerrando sidebar de detalles del contacto.');
+                $contactDetailsColumn.css('display', 'none');
+
+                // Opcional: Desmarcar el chat activo en la lista izquierda
+                $('#chat-list-items .chat-list-item.active').removeClass('active');
+                currentOpenChatUserId = null; // Indicar que no hay chat abierto (si usas esta variable)
+            }
+        }
 
         /**
          * =========================================================================
@@ -1126,6 +1297,9 @@
                                 </div>`;
                             container.append(userHtml);
                         });
+                        // Forzar la re-aplicación del manejador de clics para los nuevos elementos
+                        crm_js_log('[searchWpUsersForChat] Resultados de búsqueda WP añadidos. Re-aplicando manejador de clics.', 'DEBUG');
+                        addChatListItemClickHandler(); 
                         // TODO: Añadir handler para el botón "Iniciar Chat" si se implementa
                     } else {
                         crm_js_log('No se encontraron usuarios WP para iniciar chat.', 'INFO');
@@ -1149,15 +1323,7 @@
             // Usar delegación por si el sidebar se añade/quita dinámicamente (aunque ahora es fijo)
             $(document).on('click', '#close-contact-details', function() {
                 crm_js_log('Botón Cerrar Detalles clickeado.');
-                $('#contact-details-column').css('display', 'none'); // <-- Volver a display: none
-
-                // Opcional: Desmarcar el chat activo en la lista izquierda para que no quede seleccionado
-                $('#chat-list-items .chat-list-item.active').removeClass('active');
-                currentOpenChatUserId = null; // Indicar que no hay chat abierto (si usas esta variable)
-
-                // Opcional: Podrías también limpiar el área de mensajes y ocultar el input si lo deseas
-                // $('#chat-messages-area').empty().html('<p>Selecciona una conversación para empezar.</p>');
-                // $('#chat-input-area').hide();
+                closeContactDetailsSidebar(); // Usar la función centralizada
             });
             crm_js_log('Handler para #close-contact-details inicializado.'); // Log para confirmar
         }
@@ -1242,6 +1408,7 @@
          const $ = jQuery;
          // Usar .off().on() para evitar múltiples bindings si se llama varias veces
          $('#chat-list-items').off('click', '.chat-list-item').on('click', '.chat-list-item', function() {
+            crm_js_log('[DEBUG] Delegated .chat-list-item click detected on #chat-list-items!', 'DEBUG'); // <-- NUEVO LOG
              const $clickedItem = $(this); // Guardar referencia al item clickeado
              let userId = $clickedItem.data('user-id'); // Intentar obtener de data-user-id (chats existentes)
  
@@ -1281,6 +1448,7 @@
 
         crm_js_log(`Solicitando mensajes para User ID: ${userId}`);
 
+        crm_js_log(`[DEBUG] loadConversationMessages - ANTES de iniciar $.ajax para User ID ${userId}.`, 'DEBUG'); // <-- LOG NUEVO
         $.ajax({
             url: crm_evolution_sender_params.ajax_url,
             type: 'POST',
@@ -1290,6 +1458,7 @@
                 user_id: userId
             },
             success: function(response) {
+                crm_js_log(`[DEBUG] loadConversationMessages - Callback SUCCESS ejecutado para User ID ${userId}. Procediendo a procesar respuesta.`, 'DEBUG'); // <-- LOG NUEVO
                 crm_js_log(`Respuesta recibida para mensajes de User ID ${userId}:`, 'DEBUG', response);
                 messagesContainer.empty(); // Limpiar contenedor
 
@@ -1365,181 +1534,6 @@
                     lastDisplayedMessageTimestamp = latestTimestampInBatch; // <-- Guardar timestamp del último mensaje mostrado
                     messagesContainer.scrollTop(messagesContainer[0].scrollHeight);
 
-                    // *** INICIO: Adjuntar listeners AHORA ***
-                    crm_js_log('[loadConversationMessages] Adjuntando listeners...');
-                    const $sendButton = $('#send-chat-message');
-                    const $messageInput = $('#chat-message-input');
-                    const $emojiButton = $('#emoji-picker-button');
-                    const $emojiContainer = $('#emoji-picker-container');
-                    const $attachButton = $('.btn-attach');
-                    const $previewContainer = $('#chat-attachment-preview');
-
-                    // Variable para almacenar la info del adjunto actual (accesible por attach y remove)
-                    let currentAttachment = null;
-
-                    if ($sendButton.length && $messageInput.length) {
-                        // Listener para el botón de enviar
-                        $sendButton.off('click.sendMessage').on('click.sendMessage', function() {
-                            crm_js_log('[ENVIO] Botón Enviar Mensaje clickeado (directo).');
-                            const messageText = $messageInput.val().trim();
-                            const recipientUserId = currentOpenChatUserId;
-                            crm_js_log(`[ENVIO] Texto: "${messageText}", UserID: ${recipientUserId}, Adjunto:`, 'DEBUG', currentAttachment); // Log modificado
-
-                            // Validar que haya un destinatario
-                            if (!recipientUserId) {
-                                crm_js_log('[ENVIO] Validación fallida: No hay chat activo.', 'ERROR');
-                                showNotification('Error', 'error', 'No hay una conversación seleccionada.');
-                                return;
-                            }
-
-                            // --- INICIO: Lógica de Envío Modificada ---
-                            if (currentAttachment) { // Si hay un adjunto
-                                crm_js_log(`[ENVIO] Intentando enviar adjunto a User ID: ${recipientUserId}`, 'INFO', currentAttachment);
-                                $sendButton.prop('disabled', true);
-                                crm_js_log('[ENVIO] Llamando a performAjaxRequest para crm_send_media_message_ajax...');
-
-                                performAjaxRequest(
-                                    'crm_send_media_message_ajax', // Nueva acción PHP para media
-                                    {
-                                        user_id: recipientUserId,
-                                        attachment_url: currentAttachment.url,
-                                        mime_type: currentAttachment.mime,
-                                        filename: currentAttachment.filename,
-                                        caption: messageText // Usar el texto como caption
-                                    },
-                                    function(response) { // onSuccess
-                                        crm_js_log('[ENVIO-MEDIA] AJAX onSuccess ejecutado.', 'INFO', response);
-                                        // Limpiar preview y datos
-                                        currentAttachment = null;
-                                        $previewContainer.empty().hide();
-                                        $messageInput.val(''); // Limpiar caption
-                                        // TODO: Actualización optimista para media? (Más complejo)
-                                    }
-                                ).always(function() {
-                                    crm_js_log('[ENVIO-MEDIA] AJAX always ejecutado. Habilitando botón.');
-                                    $sendButton.prop('disabled', false);
-                                });
-
-                            } else if (messageText) { // Si NO hay adjunto pero SÍ hay texto
-                                crm_js_log(`[ENVIO] Intentando enviar texto a User ID: ${recipientUserId}`, 'INFO', { text: messageText });
-                                $sendButton.prop('disabled', true);
-                                crm_js_log('[ENVIO] Llamando a performAjaxRequest para crm_send_message_ajax...');
-
-                                performAjaxRequest(
-                                    'crm_send_message_ajax',
-                                    { user_id: recipientUserId, message_text: messageText },
-                                    function(response) { // onSuccess
-                                        crm_js_log('[ENVIO-TEXTO] AJAX onSuccess ejecutado.', 'INFO', response);
-                                        // --- INICIO: Actualización Optimista ELIMINADA ---
-                                        // Ya no añadimos el mensaje aquí. Esperamos al heartbeat.
-                                        // --- FIN: Actualización Optimista ELIMINADA ---
-                                        $messageInput.val('');
-                                    }
-                                ).always(function() {
-                                    crm_js_log('[ENVIO-TEXTO] AJAX always ejecutado. Habilitando botón.');
-                                    $sendButton.prop('disabled', false);
-                                });
-
-                            } else { // Ni adjunto ni texto
-                                crm_js_log('[ENVIO] Validación fallida: Mensaje vacío y sin adjunto.', 'WARN');
-                                showNotification('Mensaje Vacío', 'warning', 'Escribe un mensaje o adjunta un archivo.');
-                            }
-                            // --- FIN: Lógica de Envío Modificada ---
-                        });
-
-                        // Listener para Enter en el input
-                        $messageInput.off('keydown.sendMessage').on('keydown.sendMessage', function(event) {
-                            if (event.key === 'Enter' && !event.shiftKey) {
-                                event.preventDefault();
-                                crm_js_log('[ENVIO] Enter presionado en input. Simulando clic.');
-                                $sendButton.click(); // Simular clic
-                            }
-                        });
-
-                        // Listener para el botón de Emojis
-                        if ($emojiButton.length && $emojiContainer.length) {
-                            $emojiButton.off('click.toggleEmoji').on('click.toggleEmoji', function(event) {
-                                if (event.target !== this && !$(event.target).closest(this).is(this)) return;
-                                crm_js_log('Clic DIRECTO en Botón Emoji. Toggle panel.');
-                                $emojiContainer.slideToggle(150);
-                            });
-                            // Listener para hacer clic en un emoji DENTRO del panel
-                            $emojiContainer.off('click.selectEmoji').on('click.selectEmoji', '.emoji-option', function(event) { // Añadido event
-                                crm_js_log('[EMOJI-CLICK] Clic detectado en .emoji-option. Elemento:', this);
-                                const $emojiImg = $(this).find('img.emoji');
-                                const emoji = $emojiImg.length ? $emojiImg.attr('alt') : null;
-                                crm_js_log('[EMOJI-CLICK] Emoji obtenido del alt de la imagen:', emoji);
-                                if (!emoji) {
-                                    crm_js_log('[EMOJI-CLICK] No se pudo obtener el emoji del atributo alt.', 'WARN');
-                                    return false;
-                                }
-                                crm_js_log(`Emoji seleccionado: ${emoji}`);
-                                const input = $messageInput[0];
-                                const start = input.selectionStart;
-                                const end = input.selectionEnd;
-                                const text = $messageInput.val();
-                                $messageInput.val(text.substring(0, start) + emoji + text.substring(end));
-                                input.selectionStart = input.selectionEnd = start + emoji.length;
-                                input.focus();
-                                $emojiContainer.slideUp(150);
-                                return false; // Mantener return false
-                            });
-                        } else {
-                            crm_js_log('[loadConversationMessages] Error: No se encontró #emoji-picker-button o #emoji-picker-container.', 'WARN');
-                        }
-
-                        // Listener para el botón de Adjuntar Media
-                        if ($attachButton.length) {
-                            let mediaFrame;
-                            $attachButton.off('click.attachMedia').on('click.attachMedia', function(event) {
-                                event.preventDefault();
-                                crm_js_log('Botón Adjuntar Media clickeado.');
-                                if (mediaFrame) {
-                                    mediaFrame.open();
-                                    return;
-                                }
-                                mediaFrame = wp.media({
-                                    title: 'Seleccionar o Subir Multimedia para Chat',
-                                    button: { text: 'Adjuntar al chat' },
-                                    multiple: false
-                                });
-                                mediaFrame.on('select', function() {
-                                    const attachment = mediaFrame.state().get('selection').first().toJSON();
-                                    crm_js_log('Archivo multimedia seleccionado para chat:', 'DEBUG', attachment);
-                                    currentAttachment = { // Guardar en la variable de ámbito superior
-                                        url: attachment.url,
-                                        filename: attachment.filename || attachment.url.split('/').pop(),
-                                        mime: attachment.mime,
-                                        id: attachment.id
-                                    };
-                                    crm_js_log('Adjunto actual almacenado:', 'DEBUG', currentAttachment);
-                                    renderAttachmentPreview(currentAttachment, $previewContainer);
-                                    $messageInput.focus(); // Poner foco en el input para escribir caption
-                                });
-                                mediaFrame.open();
-                            });
-                        } else {
-                            crm_js_log('[loadConversationMessages] Error: No se encontró .btn-attach.', 'WARN');
-                        }
-
-                        // Listener para quitar el adjunto (delegado al contenedor de preview)
-                        if ($previewContainer.length) {
-                            $previewContainer.off('click.removeAttachment').on('click.removeAttachment', '.remove-attachment', function(event) {
-                                event.preventDefault();
-                                crm_js_log('Quitar adjunto clickeado.');
-                                currentAttachment = null; // Limpiar datos almacenados
-                                $previewContainer.empty().hide(); // Limpiar y ocultar vista previa
-                                crm_js_log('Adjunto quitado.');
-                            });
-                        }
-
-                        crm_js_log('[loadConversationMessages] Listeners adjuntados.');
-
-                    } else {
-                        crm_js_log('[loadConversationMessages] Error: No se encontró #send-chat-message o #chat-message-input después de cargar mensajes.', 'ERROR');
-                    }
-                    // *** FIN: Adjuntar listeners AHORA ***
-
                 } else if (response.success && response.data.length === 0) {
                     messagesContainer.html('<p class="no-messages">No hay mensajes en esta conversación.</p>');
                 } else {
@@ -1548,8 +1542,126 @@
                 }
             },
             error: function(jqXHR, textStatus, errorThrown) {
+                crm_js_log(`[ERROR] loadConversationMessages - Callback ERROR ejecutado para User ID ${userId}. Status: ${textStatus}, Error: ${errorThrown}`, 'ERROR', jqXHR); // <-- LOG NUEVO
                 crm_js_log(`Error AJAX al cargar mensajes para User ID ${userId}:`, 'ERROR', { status: textStatus, error: errorThrown });
                 messagesContainer.html('<p class="error-message">Error de conexión al cargar mensajes.</p>');
+            },
+            complete: function(jqXHR, textStatus) {
+                // Este callback se ejecuta después de success o error
+                crm_js_log(`[DEBUG] loadConversationMessages - Callback COMPLETE ejecutado para User ID ${userId}. Status de la petición: ${textStatus}`, 'DEBUG', jqXHR); // <-- LOG NUEVO
+
+                // Solo adjuntar listeners si la petición fue exitosa (aunque no haya mensajes)
+                // El objeto jqXHR en complete es el XHR, no la respuesta parseada directamente como en success.
+                // Necesitamos verificar el estado de la respuesta.
+                let wasSuccessful = false;
+                if (jqXHR.responseJSON && typeof jqXHR.responseJSON.success !== 'undefined') {
+                    wasSuccessful = jqXHR.responseJSON.success;
+                } else if (textStatus === 'success' && jqXHR.status === 200) { // Fallback si no es nuestro formato JSON
+                    // Si dataType no es 'json' o la respuesta no es JSON, responseJSON será undefined.
+                    // En ese caso, confiamos en textStatus y jqXHR.status.
+                    // Para que esto funcione bien, el servidor DEBE devolver un JSON válido si dataType es 'json'.
+                    wasSuccessful = true; 
+                }
+
+                if (wasSuccessful) {
+                    crm_js_log('[loadConversationMessages - complete] La carga de mensajes fue exitosa (o no había mensajes). Adjuntando listeners del input.', 'DEBUG');
+                    
+                    // *** INICIO: LÓGICA DE ADJUNTAR LISTENERS (MOVIDA AQUÍ) ***
+                    const $sendButton = $('#send-chat-message');
+                    const $messageInput = $('#chat-message-input');
+                    const $emojiButton = $('#emoji-picker-button');
+                    const $emojiContainer = $('#emoji-picker-container');
+                    const $attachButton = $('.btn-attach'); // Asegúrate que esta clase sea la correcta para tu botón de adjuntar
+                    const $previewContainer = $('#chat-attachment-preview');
+                    let currentAttachment = null; // Variable local para el adjunto actual
+
+                    if ($sendButton.length && $messageInput.length) {
+                        // Listener para el botón de enviar
+                        $sendButton.off('click.sendMessage').on('click.sendMessage', function() {
+                            // alert('¡Clic en Enviar Mensaje detectado!'); // Descomenta si necesitas el alert
+                            crm_js_log('[ENVIO] Botón Enviar Mensaje clickeado (directo).');
+                            const messageText = $messageInput.val().trim();
+                            const recipientUserId = currentOpenChatUserId;
+                            crm_js_log(`[ENVIO] Texto: "${messageText}", UserID: ${recipientUserId}, Adjunto:`, 'DEBUG', currentAttachment);
+
+                            if (!recipientUserId) {
+                                crm_js_log('[ENVIO] Validación fallida: No hay chat activo.', 'ERROR');
+                                showNotification('Error', 'error', 'No hay una conversación seleccionada.');
+                                return;
+                            }
+
+                            if (currentAttachment) {
+                                crm_js_log(`[ENVIO] Intentando enviar adjunto a User ID: ${recipientUserId}`, 'INFO', currentAttachment);
+                                $sendButton.prop('disabled', true);
+                                performAjaxRequest('crm_send_media_message_ajax', { user_id: recipientUserId, attachment_url: currentAttachment.url, mime_type: currentAttachment.mime, filename: currentAttachment.filename, caption: messageText },
+                                    function(response) { // onSuccess para envío de media
+                                        crm_js_log('[ENVIO-MEDIA] AJAX onSuccess ejecutado.', 'INFO', response);
+                                        // Verificar si la respuesta del backend incluye el mensaje enviado
+                                        if (response && response.sent_message) {
+                                            crm_js_log('[ENVIO-MEDIA] Renderizando mensaje enviado (optimista).', 'DEBUG', response.sent_message);
+                                            renderSingleMessage(response.sent_message, messagesContainer);
+                                            messagesContainer.scrollTop(messagesContainer[0].scrollHeight); // Scroll al nuevo mensaje
+                                        }
+                                        currentAttachment = null; $previewContainer.empty().hide(); $messageInput.val(''); 
+                                    }
+                                ).always(function() { $sendButton.prop('disabled', false); });
+                            } else if (messageText) {
+                                crm_js_log(`[ENVIO] Intentando enviar texto a User ID: ${recipientUserId}`, 'INFO', { text: messageText });
+                                $sendButton.prop('disabled', true);
+                                performAjaxRequest('crm_send_message_ajax', { user_id: recipientUserId, message_text: messageText },
+                                    function(response) { // onSuccess para envío de texto
+                                        crm_js_log('[ENVIO-TEXTO] AJAX onSuccess ejecutado.', 'INFO', response);
+                                        // Verificar si la respuesta del backend incluye el mensaje enviado
+                                        if (response && response.sent_message) {
+                                            crm_js_log('[ENVIO-TEXTO] Renderizando mensaje enviado (optimista).', 'DEBUG', response.sent_message);
+                                            renderSingleMessage(response.sent_message, messagesContainer);
+                                            messagesContainer.scrollTop(messagesContainer[0].scrollHeight); // Scroll al nuevo mensaje
+                                        }
+                                        $messageInput.val(''); 
+                                    }
+                                ).always(function() { $sendButton.prop('disabled', false); });
+                            } else {
+                                crm_js_log('[ENVIO] Validación fallida: Mensaje vacío y sin adjunto.', 'WARN');
+                                showNotification('Mensaje Vacío', 'warning', 'Escribe un mensaje o adjunta un archivo.');
+                            }
+                        });
+
+                        $messageInput.off('keydown.sendMessage').on('keydown.sendMessage', function(event) { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); $sendButton.click(); } });
+                        
+                        if ($emojiButton.length && $emojiContainer.length) {
+                            $emojiButton.off('click.toggleEmoji').on('click.toggleEmoji', function(event) { /* ... lógica emoji ... */ $emojiContainer.slideToggle(150); });
+                            $emojiContainer.off('click.selectEmoji').on('click.selectEmoji', '.emoji-option', function(event) { /* ... lógica seleccionar emoji ... */ });
+                        } else {
+                            crm_js_log('[loadConversationMessages - complete] Error: No se encontró #emoji-picker-button o #emoji-picker-container.', 'WARN');
+                        }
+
+                        if ($attachButton.length) {
+                            let mediaFrameChat; // Usar un nombre diferente para el frame de media del chat
+                            $attachButton.off('click.attachMediaChat').on('click.attachMediaChat', function(event) {
+                                event.preventDefault();
+                                if (mediaFrameChat) { mediaFrameChat.open(); return; }
+                                mediaFrameChat = wp.media({ title: 'Seleccionar Multimedia para Chat', button: { text: 'Adjuntar' }, multiple: false });
+                                mediaFrameChat.on('select', function() {
+                                    const attachment = mediaFrameChat.state().get('selection').first().toJSON();
+                                    currentAttachment = { url: attachment.url, filename: attachment.filename || attachment.url.split('/').pop(), mime: attachment.mime, id: attachment.id };
+                                    renderAttachmentPreview(currentAttachment, $previewContainer);
+                                    $messageInput.focus();
+                                });
+                                mediaFrameChat.open();
+                            });
+                        } else {
+                            crm_js_log('[loadConversationMessages - complete] Error: No se encontró .btn-attach.', 'WARN');
+                        }
+
+                        if ($previewContainer.length) {
+                            $previewContainer.off('click.removeAttachment').on('click.removeAttachment', '.remove-attachment', function(event) { event.preventDefault(); currentAttachment = null; $previewContainer.empty().hide(); });
+                        }
+
+                        crm_js_log('[loadConversationMessages - complete] Listeners del input adjuntados.');
+                    } else {
+                        crm_js_log('[loadConversationMessages - complete] Error: No se encontró #send-chat-message o #chat-message-input.', 'ERROR');
+                    }
+                }
             }
         });
     }
@@ -1584,6 +1696,14 @@
                         <span>${escapeHtml(details.display_name)}</span>
                     </div>
                     <div class="form-field">
+                        <label>Nombres:</label>
+                        <span>${escapeHtml(details.first_name || '')}</span>
+                    </div>
+                    <div class="form-field">
+                        <label>Apellidos:</label>
+                        <span>${escapeHtml(details.last_name || '')}</span>
+                    </div>
+                    <div class="form-field">
                         <label>Teléfono:</label>
                         <span>${escapeHtml(details.phone)}</span>
                         ${details.jid ? `<small style="display: block; color: #666;">(JID: ${escapeHtml(details.jid)})</small>` : ''}
@@ -1593,17 +1713,60 @@
                         <span>${escapeHtml(details.email)}</span>
                     </div>
                     <div class="form-field">
+                        <label>Rol:</label>
+                        <span>${escapeHtml(details.role)}</span>
+                    </div>
+                    <div class="form-field">
+                        <label>Registrado:</label>
+                        <span>${escapeHtml(details.registration_date)}</span>
+                    </div>
+                    <div class="form-field">
                         <label>Etiqueta:</label>
                         <span class="tag-badge" data-tag-key="${escapeHtml(details.tag_key)}">${escapeHtml(details.tag_name)}</span>
                         <!-- TODO: Añadir botón/icono para editar etiqueta -->
                     </div>
                     <div class="form-field">
                         <label>Notas:</label>
-                        <div class="contact-notes" style="background-color: #f9f9f9; border: 1px solid #eee; padding: 10px; min-height: 50px; border-radius: 3px;">
+                        <div class="contact-notes-content" style="background-color: #f9f9f9; border: 1px solid #eee; padding: 10px; min-height: 50px; border-radius: 3px;">
                             ${details.notes ? escapeHtml(details.notes).replace(/\n/g, '<br>') : '<i>Sin notas</i>'}
                         </div>
-                        <!-- TODO: Añadir botón/icono para editar notas -->
                     </div>
+                    ${details.last_purchase && details.last_purchase.id ? `
+                    <hr>
+                    <div class="form-field">
+                        <label style="font-weight: bold; margin-bottom: 8px; display: block; color: #333;">Última Compra:</label>
+                        <div class="last-purchase-details" style="font-size: 0.9em; line-height: 1.6;">
+                            <p style="margin: 0 0 5px 0;"><strong>ID Orden:</strong> 
+                                ${details.last_purchase.url ? `<a href="${escapeHtml(details.last_purchase.url)}" target="_blank" title="Ver orden en WooCommerce">#${escapeHtml(details.last_purchase.id)}</a>` : `#${escapeHtml(details.last_purchase.id)}`}
+                            </p>
+                            <p style="margin: 0 0 5px 0;"><strong>Fecha:</strong> ${escapeHtml(details.last_purchase.date)}</p>
+                            <p style="margin: 0 0 5px 0;"><strong>Total:</strong> ${details.last_purchase.total}</p>
+                            <p style="margin: 0 0 5px 0;"><strong>Estado:</strong> <span class="order-status-badge" style="padding: 2px 6px; border-radius: 3px; background-color: #eee; color: #333;">${escapeHtml(details.last_purchase.status)}</span></p>
+                        </div>
+                    </div>
+                    ` : `
+                    <hr>
+                    <div class="form-field">
+                        <label style="font-weight: bold; margin-bottom: 8px; display: block; color: #333;">Última Compra:</label>
+                        <p style="margin: 0; font-size: 0.9em; color: #666;"><em>No se encontraron compras recientes.</em></p>
+                    </div>
+                    `}
+                    ${details.customer_history && details.customer_history.total_orders !== null ? ` <!-- Verifica si existe el historial -->
+                    <hr>
+                    <div class="customer-history-panel">
+                        <h4 class="customer-history-title" style="cursor: pointer; margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center;">
+                            Historial de Cliente (WooCommerce)
+                            <span class="toggle-arrow dashicons dashicons-arrow-down-alt2"></span>
+                        </h4>
+                        <div class="customer-history-content" style="font-size: 0.9em; line-height: 1.6; padding-left: 10px; border-left: 2px solid #eee; margin-left: 5px;">
+                            <p style="margin: 0 0 5px 0;"><strong>Total Pedidos:</strong> ${escapeHtml(details.customer_history.total_orders)}</p>
+                            <p style="margin: 0 0 5px 0;"><strong>Ingresos Totales:</strong> ${details.customer_history.total_revenue}</p> <!-- Ya viene formateado con wc_price -->
+                            <p style="margin: 0 0 5px 0;"><strong>Valor Promedio Pedido:</strong> ${details.customer_history.average_order_value}</p> <!-- Ya viene formateado con wc_price -->
+                        </div>
+                    </div>
+                    ` : ''
+                    }
+
                     <hr>
                     <div style="text-align: right;">
                             <button id="edit-contact-button" class="button" data-user-id="${details.user_id}"><span class="dashicons dashicons-edit" style="vertical-align: middle; margin-top: -2px;"></span> Editar</button>
@@ -1612,6 +1775,19 @@
 
                 // Insertar el HTML en el contenedor
                 $detailsContainer.html(detailsHtml);
+
+                // Añadir listener para el panel colapsable de Historial de Cliente
+                // Usar delegación en $detailsContainer ya que el contenido se acaba de añadir
+                $detailsContainer.off('click.toggleHistory').on('click.toggleHistory', '.customer-history-title', function() {
+                    const $content = $(this).next('.customer-history-content');
+                    const $arrow = $(this).find('.toggle-arrow');
+                    $content.slideToggle(200);
+                    if ($arrow.hasClass('dashicons-arrow-down-alt2')) {
+                        $arrow.removeClass('dashicons-arrow-down-alt2').addClass('dashicons-arrow-right-alt2');
+                    } else {
+                        $arrow.removeClass('dashicons-arrow-right-alt2').addClass('dashicons-arrow-down-alt2');
+                    }
+                });
 
             },
             function(errorResponse) { // onError (manejado parcialmente por performAjaxRequest)

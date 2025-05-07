@@ -110,6 +110,17 @@ function crm_evolution_sender_chat_history_page_html() {
                     <p><?php esc_html_e( 'Cargando detalles...', CRM_EVOLUTION_SENDER_TEXT_DOMAIN ); ?></p>
                     <!-- Aquí se cargarán los campos del contacto vía AJAX -->
                 </div>
+
+                <!-- === INICIO: Vista Ampliada del Avatar (MOVIDO FUERA DE contact-details-content) === -->
+                <div id="contact-avatar-expanded-view" class="contact-avatar-expanded-view" style="display: none;">
+                    <button id="close-avatar-expanded-view" class="button-icon close-expanded-avatar-button" title="<?php esc_attr_e( 'Cerrar', CRM_EVOLUTION_SENDER_TEXT_DOMAIN ); ?>"><span class="dashicons dashicons-no-alt"></span></button>
+                    <img id="expanded-avatar-image" src="" alt="<?php esc_attr_e( 'Avatar Ampliado', CRM_EVOLUTION_SENDER_TEXT_DOMAIN ); ?>" />
+                    <div class="expanded-avatar-actions">
+                        <button id="trigger-update-avatar-button" class="button button-primary"><?php esc_html_e( 'Actualizar foto', CRM_EVOLUTION_SENDER_TEXT_DOMAIN ); ?></button>
+                        <!-- Podríamos añadir un input file oculto aquí si no usamos el media uploader de WP directamente -->
+                    </div>
+                </div>
+                <!-- === FIN: Vista Ampliada del Avatar === -->
             </div>
             <!-- === FIN: Nueva Columna para Detalles del Contacto === -->
         </div>

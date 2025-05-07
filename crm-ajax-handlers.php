@@ -50,7 +50,7 @@ function crm_evolution_api_request( $method, $endpoint, $body = [], $instance_ap
 
     if ( ! empty( $body ) && ($method === 'POST' || $method === 'PUT' || $method === 'DELETE') ) {
         $args['body'] = wp_json_encode( $body );
-         //crm_log( "Cuerpo de la petición: " . wp_json_encode( $body ), 'DEBUG' );
+        //  crm_log_to_file( "[crm_evolution_api_request] Cuerpo de la petición (args['body']): " . $args['body'], 'DEBUG-BODY' ); // Log más directo
     }
 
     $response = wp_remote_request( $request_url, $args );
@@ -381,10 +381,14 @@ add_action( 'wp_ajax_crm_disconnect_instance', 'crm_disconnect_instance_callback
  * AJAX Handler para obtener instancias activas (conectadas o esperando QR) para selects.
  */
 function crm_get_active_instances_callback() {
-    // //crm_log( 'Recibida petición AJAX: crm_get_active_instances' );
-   check_ajax_referer( 'crm_evolution_sender_nonce', '_ajax_nonce' );
+   error_log( 'Recibida petición AJAX: crm_get_active_instances' );
+
+   // 1. Seguridad: Verificar Nonce y Permisos.
+   // El nonce debe ser generado con la acción 'wp_rest' y enviado como 'security' desde el frontend.
+   check_ajax_referer( 'wp_rest', 'security' );
+
    if ( ! current_user_can( 'manage_options' ) ) {
-       wp_send_json_error( array( 'message' => 'Permiso denegado.' ), 403 );
+       wp_send_json_error( array( 'message' => __( 'Permiso denegado.', CRM_EVOLUTION_SENDER_TEXT_DOMAIN ) ), 403 );
    }
 
    $api_response = crm_evolution_api_request( 'GET', '/instance/fetchInstances' );
@@ -395,12 +399,21 @@ function crm_get_active_instances_callback() {
        $active_instances = array();
        foreach ( $api_response as $instance ) {
            $status = isset($instance['instance']['status']) ? $instance['instance']['status'] : 'unknown';
+           $instance_name_from_api = isset($instance['instance']['instanceName']) ? $instance['instance']['instanceName'] : null;
+
            // Considerar activas las que están conectadas o esperando QR
-           if ( $status === 'connection' || $status === 'qrcode' || $status === 'connecting' ) { // Ajusta según estados reales
+           // Añadimos 'open' como estado conectado también.
+           if ( $instance_name_from_api && in_array($status, ['open', 'connected', 'connection', 'qrcode', 'connecting']) ) {
+                // Formatear el texto del estado para ser más legible
+                $status_text = ucfirst($status);
+                if ($status === 'qrcode') $status_text = 'Esperando QR';
+                if ($status === 'connection' || $status === 'connected') $status_text = 'Conectada';
+                if ($status === 'connecting') $status_text = 'Conectando';
+
                 $active_instances[] = array(
-                   'instance_name' => isset($instance['instance']['instanceName']) ? $instance['instance']['instanceName'] : 'N/D',
-                   'status'        => $status,
-               );
+                   'value' => $instance_name_from_api,
+                   'text'  => $instance_name_from_api . ' (' . $status_text . ')',
+                );
            }
        }
         // //crm_log( 'Instancias activas obtenidas: ' . count($active_instances), 'INFO' );
@@ -785,8 +798,17 @@ function crm_send_message_ajax() {
     if ( is_wp_error( $result ) ) {
         wp_send_json_error( array( 'message' => $result->get_error_message() ) );
     } else {
-        // Podríamos devolver más info de la API si fuera útil
-        wp_send_json_success( array( 'message' => 'Mensaje enviado (o en proceso).', 'api_response' => $result ) );
+        // Verificar si $result contiene los datos del mensaje para el frontend
+        if ( is_array( $result ) && isset( $result['sent_message_data'] ) ) {
+            wp_send_json_success( array(
+                'message' => 'Mensaje enviado (o en proceso).',
+                'api_response' => $result['api_response'],
+                'sent_message' => $result['sent_message_data'] // Enviar el objeto del mensaje al frontend
+            ) );
+        } else {
+            // Fallback por si algo no devuelve la estructura esperada (solo respuesta API)
+            wp_send_json_success( array( 'message' => 'Mensaje enviado (o en proceso).', 'api_response' => $result ) );
+        }
     }
 }
 add_action( 'wp_ajax_crm_send_message_ajax', 'crm_send_message_ajax' );
@@ -877,12 +899,28 @@ function crm_send_whatsapp_message( $user_id, $message_text ) {
             //crm_log( "Error al guardar el mensaje saliente en la BD para User ID {$user_id}.", 'ERROR', $post_id->get_error_message() );
             // No devolvemos error al frontend necesariamente, el mensaje se envió. Solo logueamos.
         } else {
+            // Construir el objeto del mensaje para el frontend
+            $message_for_frontend = array(
+                'id'            => $post_id,
+                'text'          => $message_text,
+                'timestamp'     => $message_data['timestamp'], // Usar el timestamp que se guardó
+                'is_outgoing'   => true,
+                'type'          => 'text',
+                'caption'       => null,
+                'attachment_id' => null,
+                'attachment_url'=> null,
+            );
             //crm_log( "Mensaje saliente guardado en BD con Post ID: {$post_id}", 'INFO' );
+            // Devolver tanto la respuesta de la API como los datos del mensaje guardado
+            return array(
+                'api_response' => $api_response,
+                'sent_message_data' => $message_for_frontend
+            );
         }
     } else {
          //crm_log( "Llamada API para enviar mensaje a User ID {$user_id} falló.", 'WARN', $api_response->get_error_message() );
     }
-
+    // Si la API falló o el guardado en BD falló (y no retornamos antes), devolver solo la respuesta de la API (o error)
     return $api_response;
 }
 
@@ -955,7 +993,15 @@ function crm_send_media_message_ajax() {
     if ( is_wp_error( $result ) ) {
         wp_send_json_error( array( 'message' => $result->get_error_message() ) );
     } else {
-        wp_send_json_success( array( 'message' => 'Archivo multimedia enviado (o en proceso).', 'api_response' => $result ) );
+        if ( is_array( $result ) && isset( $result['sent_message_data'] ) ) {
+            wp_send_json_success( array(
+                'message' => 'Archivo multimedia enviado (o en proceso).',
+                'api_response' => $result['api_response'],
+                'sent_message' => $result['sent_message_data']
+            ) );
+        } else {
+            wp_send_json_success( array( 'message' => 'Archivo multimedia enviado (o en proceso).', 'api_response' => $result ) );
+        }
     }
 }
 add_action( 'wp_ajax_crm_send_media_message_ajax', 'crm_send_media_message_ajax' ); // <-- Registrar la acción
@@ -1006,15 +1052,16 @@ function crm_send_whatsapp_media_message( $user_id, $attachment_url, $mime_type,
     $endpoint = "/message/sendMedia/{$active_instance_name}";
     $body = array(
         'number'        => $recipient_jid,
-        'options'       => array( 'delay' => 1200, 'presence' => 'uploading' ), // Simular subida
+        'options'       => array( 'delay' => 1200, 'presence' => 'composing' ), // Simular subida
         'mediaMessage'  => array(
-            'mediaType' => $media_type,
-            'url'       => $attachment_url,
+            'mediatype' => $media_type, // Corregido a minúsculas
+            'media'     => $attachment_url, // Corregido de 'url' a 'media'
             'caption'   => $caption, // Puede ser vacío
-            'filename'  => $filename ?: basename( $attachment_url ), // Usar filename o extraer de URL
+            'fileName'  => $filename ?: basename( $attachment_url ), // 'fileName' con 'N' mayúscula
         ),
     );
-
+    error_log( 'Api'.$endpoint);
+    error_log( 'Datos'.wp_json_encode($body) );
     // 5. Llamar a la API
     $api_response = crm_evolution_api_request( 'POST', $endpoint, $body );
 
@@ -1043,12 +1090,29 @@ function crm_send_whatsapp_media_message( $user_id, $attachment_url, $mime_type,
         if ( is_wp_error( $post_id ) ) {
             //crm_log( "Error al guardar el mensaje multimedia saliente en la BD para User ID {$user_id}.", 'ERROR', $post_id->get_error_message() );
         } else {
+            // Construir el objeto del mensaje para el frontend
+            // Para multimedia saliente, el 'attachment_id' local podría no ser relevante si solo se envía la URL.
+            // El frontend usará 'attachment_url' directamente para la vista previa optimista.
+            $message_for_frontend = array(
+                'id'            => $post_id,
+                'text'          => null, // El texto principal es el caption para media
+                'timestamp'     => $message_data['timestamp'], // Usar el timestamp que se guardó
+                'is_outgoing'   => true,
+                'type'          => $media_type, // El tipo de media detectado (image, video, etc.)
+                'caption'       => $caption,
+                'attachment_id' => null, // No tenemos un ID de adjunto local en este flujo
+                'attachment_url'=> $attachment_url, // La URL que se envió a la API
+            );
             //crm_log( "Mensaje multimedia saliente guardado en BD con Post ID: {$post_id}", 'INFO' );
+            // Devolver tanto la respuesta de la API como los datos del mensaje guardado
+            return array(
+                'api_response' => $api_response,
+                'sent_message_data' => $message_for_frontend
+            );
         }
         // --- FIN: Guardar mensaje multimedia en BD ---
     }
-
-    // 7. Devolver la respuesta
+    // Si la API falló o el guardado en BD falló (y no retornamos antes), devolver solo la respuesta de la API (o error)
     return $api_response;
 }
 
@@ -1104,12 +1168,16 @@ function crm_get_contact_details_callback() {
     $tag_key = get_user_meta( $user_id, '_crm_lifecycle_tag', true ); // Clave de la etiqueta
     $notes = get_user_meta( $user_id, '_crm_contact_notes', true ); // Notas (si las hubiera)
 
+    // Fecha de registro
+    $registration_date = date_i18n( get_option( 'date_format' ), strtotime( $user_data->user_registered ) );
+
     // Obtener nombre legible de la etiqueta
     $all_tags = crm_get_lifecycle_tags();
     $tag_name = isset( $all_tags[$tag_key] ) ? $all_tags[$tag_key] : $tag_key; // Mostrar clave si no se encuentra nombre
 
     // 5. Preparar datos para la respuesta
     $contact_details = array(
+        // Datos existentes
         'user_id'      => $user_id,
         'display_name' => $user_data->display_name,
         'email'        => $user_data->user_email,
@@ -1119,7 +1187,60 @@ function crm_get_contact_details_callback() {
         'tag_name'     => $tag_name ?: 'Sin etiqueta', // Nombre legible
         'notes'        => $notes ?: '', // Notas
         'avatar_url'   => get_avatar_url( $user_id, ['size' => 96] ), // Avatar
+        // Nuevos datos
+        'first_name'        => $user_data->first_name,
+        'last_name'         => $user_data->last_name,
+        'role'              => !empty($user_data->roles) ? translate_user_role( $user_data->roles[0] ) : 'N/A',
+        'registration_date' => $registration_date,
     );
+
+    // --- INICIO: Obtener última compra de WooCommerce ---
+    if ( class_exists( 'WooCommerce' ) ) {
+        $last_order_details = array(
+            'id'     => null,
+            'date'   => null,
+            'total'  => null,
+            'status' => null,
+            'url'    => null,
+        );
+        $customer_history = array(
+            'total_orders' => 0,
+            'total_revenue' => wc_price(0),
+            'average_order_value' => wc_price(0),
+        );
+
+        $orders = wc_get_orders( array(
+            'customer_id' => $user_id,
+            'limit'       => 1, // Solo la última orden
+            'orderby'     => 'date',
+            'order'       => 'DESC',
+            'status'      => array_keys( wc_get_order_statuses() ), // Considerar todos los estados
+        ) );
+
+        if ( ! empty( $orders ) ) {
+            $last_order = $orders[0]; // La primera es la más reciente
+            $last_order_details['id']     = $last_order->get_id();
+            $last_order_details['date']   = $last_order->get_date_created() ? $last_order->get_date_created()->date_i18n( get_option( 'date_format' ) ) : 'N/A';
+            $last_order_details['total']  = $last_order->get_formatted_order_total();
+            $last_order_details['status'] = wc_get_order_status_name( $last_order->get_status() );
+            $last_order_details['url']    = $last_order->get_edit_order_url(); // URL para ver/editar la orden en el admin
+
+            // Historial del cliente
+            $total_orders_count = wc_get_customer_order_count($user_id);
+            $total_revenue_spent = wc_get_customer_total_spent($user_id);
+            $average_order_value_calc = ($total_orders_count > 0) ? ($total_revenue_spent / $total_orders_count) : 0;
+
+            $customer_history['total_orders'] = $total_orders_count;
+            $customer_history['total_revenue'] = wc_price($total_revenue_spent);
+            $customer_history['average_order_value'] = wc_price($average_order_value_calc);
+        }
+        $contact_details['last_purchase'] = $last_order_details;
+        $contact_details['customer_history'] = $customer_history;
+    } else {
+        $contact_details['last_purchase'] = null; // WooCommerce no está activo
+        $contact_details['customer_history'] = null;
+    }
+    // --- FIN: Obtener última compra de WooCommerce ---
 
     //crm_log( "Enviando detalles del contacto User ID: {$user_id} al frontend.", 'INFO' );
     wp_send_json_success( $contact_details );
@@ -1144,6 +1265,8 @@ function crm_save_contact_details_callback() {
     $name    = isset( $_POST['name'] ) ? sanitize_text_field( wp_unslash( $_POST['name'] ) ) : '';
     $email   = isset( $_POST['email'] ) ? sanitize_email( wp_unslash( $_POST['email'] ) ) : '';
     $tag_key = isset( $_POST['tag_key'] ) ? sanitize_key( $_POST['tag_key'] ) : '';
+    $first_name = isset( $_POST['first_name'] ) ? sanitize_text_field( wp_unslash( $_POST['first_name'] ) ) : '';
+    $last_name  = isset( $_POST['last_name'] ) ? sanitize_text_field( wp_unslash( $_POST['last_name'] ) ) : '';
     $notes   = isset( $_POST['notes'] ) ? sanitize_textarea_field( wp_unslash( $_POST['notes'] ) ) : '';
 
     // 3. Validar datos
@@ -1167,7 +1290,8 @@ function crm_save_contact_details_callback() {
         'ID'           => $user_id,
         'display_name' => $name,
         'user_email'   => $email,
-        // Podríamos actualizar first_name/last_name si los tuviéramos separados
+        'first_name'   => $first_name,
+        'last_name'    => $last_name,
     );
     $update_result = wp_update_user( $user_data_update );
 
@@ -1221,3 +1345,221 @@ function crm_get_etiquetas_for_select_callback() {
 
 }
 add_action( 'wp_ajax_crm_get_etiquetas_for_select', 'crm_get_etiquetas_for_select_callback' );
+
+// =========================================================================
+// == MANEJADOR AJAX - ACTUALIZAR AVATAR DEL CONTACTO ==
+// =========================================================================
+
+/**
+ * AJAX Handler para actualizar la foto de perfil (avatar) de un contacto.
+ * Recibe el user_id y el attachment_id de la nueva imagen.
+ */
+function crm_update_contact_avatar_callback() {
+    //crm_log( 'Recibida petición AJAX: crm_update_contact_avatar' );
+
+    // 1. Verificar Nonce y Permisos
+    check_ajax_referer( 'crm_evolution_sender_nonce', '_ajax_nonce' );
+    if ( ! current_user_can( 'edit_users' ) ) { // Capacidad para editar usuarios
+        //crm_log( 'Error AJAX: Permiso denegado para crm_update_contact_avatar.', 'ERROR' );
+        wp_send_json_error( array( 'message' => 'No tienes permisos suficientes para actualizar el avatar.' ), 403 );
+    }
+
+    // 2. Obtener y sanitizar datos
+    $user_id = isset( $_POST['user_id'] ) ? absint( $_POST['user_id'] ) : 0;
+    $new_attachment_id = isset( $_POST['attachment_id'] ) ? absint( $_POST['attachment_id'] ) : 0;
+
+    // 3. Validar datos
+    if ( $user_id <= 0 ) {
+        wp_send_json_error( array( 'message' => 'ID de usuario inválido.' ), 400 );
+    }
+    if ( $new_attachment_id <= 0 ) {
+        wp_send_json_error( array( 'message' => 'ID de adjunto inválido.' ), 400 );
+    }
+
+    // 4. Obtener el ID del avatar anterior
+    $old_attachment_id = get_user_meta( $user_id, '_crm_avatar_attachment_id', true );
+
+    // 5. Actualizar el metadato del usuario con el nuevo ID del adjunto
+    update_user_meta( $user_id, '_crm_avatar_attachment_id', $new_attachment_id );
+
+    // 6. Si había un avatar anterior y es diferente al nuevo, eliminar el adjunto antiguo
+    if ( $old_attachment_id && is_numeric($old_attachment_id) && (int)$old_attachment_id !== $new_attachment_id ) {
+        $deleted = wp_delete_attachment( (int)$old_attachment_id, true ); // true para forzar la eliminación del archivo
+        if ($deleted) {
+            //crm_log( "Avatar anterior (Attachment ID: {$old_attachment_id}) eliminado para User ID: {$user_id}.", 'INFO' );
+        } else {
+            //crm_log( "Error al intentar eliminar el avatar anterior (Attachment ID: {$old_attachment_id}) para User ID: {$user_id}.", 'WARN' );
+        }
+    }
+
+    // 7. Obtener la URL del nuevo avatar para devolverla
+    $new_avatar_url = wp_get_attachment_url( $new_attachment_id );
+
+    if ( ! $new_avatar_url ) {
+        wp_send_json_error( array( 'message' => 'No se pudo obtener la URL del nuevo avatar.' ), 404 );
+    }
+
+    //crm_log( "Avatar actualizado para User ID: {$user_id}. Nuevo Attachment ID: {$new_attachment_id}. URL: {$new_avatar_url}", 'INFO' );
+    wp_send_json_success( array( 'message' => 'Avatar actualizado correctamente.', 'new_avatar_url' => $new_avatar_url ) );
+}
+add_action( 'wp_ajax_crm_update_contact_avatar', 'crm_update_contact_avatar_callback' );
+
+
+/**
+ * Envía un mensaje de WhatsApp (texto o multimedia) a través de una instancia específica de Evolution API.
+ * Obtiene el perfil del contacto, procesa/crea el usuario en WP si el número existe en WA,
+ * y luego guarda el mensaje enviado en el CPT.
+ *
+ * @param string $recipient_identifier Número de teléfono del destinatario con prefijo de país (ej: "591711XXXXX").
+ * @param string $message_content Texto del mensaje. Si es multimedia, este será el caption.
+ * @param string $target_instance_name Nombre de la instancia de Evolution API a utilizar (obligatorio).
+ * @param string|null $media_url URL completa del archivo multimedia a enviar (opcional).
+ * @param string|null $media_filename Nombre del archivo multimedia para mostrar al destinatario (opcional, se extrae de la URL si no se provee).
+ * @return array|WP_Error Respuesta de la API Evolution o WP_Error en caso de fallo.
+ */
+function crm_external_send_whatsapp_message( $recipient_identifier, $message_content, $target_instance_name, $media_url = null, $media_filename = null ) {
+    //crm_log( "[External Send V5 - FetchProfile & NumberExists] Iniciando. Destinatario: {$recipient_identifier}, Instancia: {$target_instance_name}", 'INFO' );
+
+    // 1. Validar nombre de instancia
+    if ( empty( $target_instance_name ) ) {
+        //crm_log( "[External Send V5] Error: Nombre de instancia objetivo no proporcionado.", 'ERROR' );
+        return new WP_Error( 'missing_instance_name', __( 'El nombre de la instancia de envío es obligatorio.', CRM_EVOLUTION_SENDER_TEXT_DOMAIN ) );
+    }
+
+    // 2. Validar número de teléfono del destinatario.
+    if ( ! is_string( $recipient_identifier ) || ! preg_match( '/^\+?[0-9]{5,}$/', $recipient_identifier ) ) {
+        //crm_log( "[External Send V5] Error: Identificador de destinatario '{$recipient_identifier}' NO ES UN NÚMERO DE TELÉFONO VÁLIDO.", 'ERROR' );
+        return new WP_Error( 'invalid_recipient_phone_format', __( 'El número de teléfono del destinatario no es válido. Debe incluir prefijo de país y tener al menos 5 dígitos.', CRM_EVOLUTION_SENDER_TEXT_DOMAIN ) );
+    }
+    $recipient_phone_number = sanitize_text_field( $recipient_identifier );
+
+    // 3. Obtener perfil del contacto desde Evolution API
+    //crm_log( "[External Send V5] Obteniendo perfil para número: {$recipient_phone_number} desde instancia {$target_instance_name}", 'INFO' );
+    $profile_endpoint = "/chat/fetchProfile/{$target_instance_name}";
+    $profile_body = ['number' => $recipient_phone_number];
+    $profile_response = crm_evolution_api_request( 'POST', $profile_endpoint, $profile_body );
+
+    $contact_user_id = 0;
+    // JID por defecto si fetchProfile falla o el número no existe en WA. Se construye a partir del número original.
+    $contact_jid_to_process = preg_replace( '/[^0-9]/', '', $recipient_phone_number ) . '@s.whatsapp.net';
+    $contact_push_name = null;
+    $contact_avatar_url = null;
+    $process_wp_user = false; // Flag para decidir si procesar el usuario en WP
+
+    if ( !is_wp_error( $profile_response ) && isset( $profile_response['numberExists'] ) && $profile_response['numberExists'] === true ) {
+        // El número existe en WhatsApp y tenemos datos de perfil
+        $contact_jid_to_process = isset($profile_response['wuid']) ? sanitize_text_field($profile_response['wuid']) : $contact_jid_to_process;
+        $contact_push_name = isset($profile_response['name']) ? sanitize_text_field($profile_response['name']) : null;
+        $contact_avatar_url = isset($profile_response['picture']) ? esc_url_raw($profile_response['picture']) : null;
+        $process_wp_user = true; // Marcar para procesar usuario WP
+        //crm_log( "[External Send V5] Perfil obtenido y número existe: JID='{$contact_jid_to_process}', Name='{$contact_push_name}'", 'INFO' );
+    } elseif (is_wp_error( $profile_response )) {
+        //crm_log( "[External Send V5] Error al obtener perfil para {$recipient_phone_number}: " . $profile_response->get_error_message(), 'WARN' );
+        // Se usará $contact_jid_to_process por defecto. No se procesará usuario WP.
+    } else {
+        //crm_log( "[External Send V5] El número {$recipient_phone_number} no existe en WhatsApp según fetchProfile o respuesta inválida.", 'WARN', $profile_response );
+        // Se usará $contact_jid_to_process por defecto. No se procesará usuario WP.
+    }
+
+    // 4. Procesar/Crear Usuario WP (solo si el número existe en WA y tenemos perfil)
+    if ( $process_wp_user ) {
+        // La función crm_instances_process_single_jid está en crm-instances.php
+        if ( function_exists( 'crm_instances_process_single_jid' ) ) {
+            //crm_log( "[External Send V5] Procesando usuario WP para JID: {$contact_jid_to_process}, PushName: {$contact_push_name}", 'INFO' );
+            // El cuarto parámetro de crm_instances_process_single_jid ($usePushName) es true si queremos usar el pushName.
+            // El quinto es la URL del avatar.
+            $contact_user_id = crm_instances_process_single_jid( $contact_jid_to_process, $target_instance_name, $contact_push_name, true, $contact_avatar_url );
+        } else {
+            //crm_log( "[External Send V5] ADVERTENCIA: La función crm_instances_process_single_jid no está disponible. No se procesará/creará usuario WP.", 'WARN' );
+        }
+    }
+
+    // 5. Preparar datos para la API Evolution (Envío de mensaje)
+    $body = array(
+        'number'  => $recipient_phone_number, // Usar el número de teléfono original para el envío
+        'options' => array( 'delay' => 1200, 'presence' => 'composing' ),
+    );
+    $endpoint_suffix = '';
+    $api_media_type = 'document'; // Por defecto para la API, se actualiza si hay media
+    $mime_type = null; // Para CPT
+
+    if ( ! empty( $media_url ) ) {
+        // Es un mensaje multimedia
+        $filetype_data = wp_check_filetype( basename( $media_url ) );
+        $mime_type = $filetype_data['type'] ?? null; // Guardar para CPT
+
+        if ( $mime_type ) {
+            if ( strpos( $mime_type, 'image/' ) === 0 ) $api_media_type = 'image';
+            elseif ( strpos( $mime_type, 'video/' ) === 0 ) $api_media_type = 'video';
+            elseif ( strpos( $mime_type, 'audio/' ) === 0 ) $api_media_type = 'audio';
+        }
+        // $api_media_type se queda como 'document' si no es image/video/audio
+
+        $body['mediaMessage'] = array(
+            'mediatype' => $api_media_type,
+            'media'     => esc_url_raw( $media_url ),
+            'caption'   => $message_content, // El contenido del mensaje es el caption
+            'fileName'  => $media_filename ?: basename( $media_url ),
+        );
+        $endpoint_suffix = "/message/sendMedia/{$target_instance_name}";
+        //crm_log( "[External Send V5] Preparando mensaje multimedia. Tipo API: {$api_media_type}", 'INFO' );
+    } else {
+        // Es un mensaje de texto
+        if ( empty( $message_content ) ) {
+            //crm_log( "[External Send V5] Error: El contenido del mensaje de texto no puede estar vacío.", 'ERROR' );
+            return new WP_Error( 'empty_message_content', __( 'El contenido del mensaje no puede estar vacío.', CRM_EVOLUTION_SENDER_TEXT_DOMAIN ) );
+        }
+        $body['textMessage'] = array( 'text' => $message_content );
+        $endpoint_suffix = "/message/sendText/{$target_instance_name}";
+        $api_media_type = 'text'; // Para el CPT
+        //crm_log( "[External Send V5] Preparando mensaje de texto.", 'INFO' );
+    }
+
+    // 6. Llamar a la API para enviar el mensaje
+    $api_response = crm_evolution_api_request( 'POST', $endpoint_suffix, $body );
+
+    // 7. Si la llamada a la API fue exitosa, GUARDAR el mensaje saliente en la BD
+    if ( ! is_wp_error( $api_response ) && isset($api_response['key']['id']) ) {
+        //crm_log( "[External Send V5] API de envío OK. Respuesta: ", 'INFO', $api_response );
+
+        $whatsapp_message_id = sanitize_text_field( $api_response['key']['id'] );
+        $message_type_for_cpt = $api_media_type; // Usar el tipo determinado (text, image, video, audio, document)
+
+        $message_data_for_cpt = array(
+            'contact_user_id'     => $contact_user_id, // ID del usuario WP (puede ser 0)
+            'instance_name'       => $target_instance_name,
+            'sender_jid'          => null, // Para un mensaje saliente desde API, el sender es la instancia.
+            'recipient_jid'       => $contact_jid_to_process, // JID del destinatario (obtenido de fetchProfile o construido)
+            'is_outgoing'         => true,
+            'message_id_wa'       => $whatsapp_message_id,
+            'timestamp_wa'        => time(), // Usar el tiempo actual del servidor WP
+            'message_type'        => $message_type_for_cpt,
+            'message_text'        => ( $media_url ? null : $message_content ), // Texto solo si no es media
+            'base64_data'         => null, // No tenemos base64 en este flujo de envío
+            'media_mimetype'      => $media_url ? $mime_type : null, // Mime type original si es media
+            'media_caption'       => $media_url ? $message_content : null, // Caption si es media
+            'is_group_message'    => false, // Asumimos que no se envían a grupos desde aquí
+            'participant_jid'     => null,
+        );
+
+        // La función crm_save_chat_message está en crm-rest-api.php
+        if ( function_exists( 'crm_save_chat_message' ) ) {
+            $post_id = crm_save_chat_message( $message_data_for_cpt );
+            if ( is_wp_error( $post_id ) ) {
+                //crm_log( "[External Send V5] Error al guardar mensaje en BD para JID {$contact_jid_to_process} (User ID {$contact_user_id}): " . $post_id->get_error_message(), 'ERROR' );
+            } elseif ( $post_id === 0 || (is_numeric($post_id) && get_post_type($post_id) !== 'crm_chat' && $post_id !== false) ) { // Condición de duplicado o no guardado
+                //crm_log( "[External Send V5] Mensaje WA ID {$whatsapp_message_id} ya existe en BD o no se guardó. Resultado: " . print_r($post_id, true), 'INFO' );
+            } else {
+                //crm_log( "[External Send V5] Mensaje WA ID {$whatsapp_message_id} guardado en BD con Post ID: {$post_id}", 'INFO' );
+            }
+        } else {
+            //crm_log( "[External Send V5] ADVERTENCIA: La función crm_save_chat_message no está disponible. Mensaje no guardado en CPT.", 'WARN' );
+        }
+    }
+
+    if (is_wp_error($api_response)) {
+        //crm_log( "[External Send V5] API de envío Falló. Destinatario: {$recipient_phone_number}, Instancia: {$target_instance_name}. Error: " . $api_response->get_error_message(), 'ERROR' );
+    }
+
+    return $api_response;
+}

@@ -622,6 +622,7 @@ function crm_instances_process_single_jid($jid, $instanceName, $pushNameToUse = 
 
         // Guardar metadatos básicos
         update_user_meta($user_id, '_crm_whatsapp_jid', $jid);
+        update_user_meta($user_id, 'billing_phone', $number);
         update_user_meta($user_id, 'billing_first_name', $first_name);
         update_user_meta($user_id, 'billing_last_name', $last_name);
         update_user_meta($user_id, '_crm_instance_name', $instanceName); // Guardar instancia para el Cron
