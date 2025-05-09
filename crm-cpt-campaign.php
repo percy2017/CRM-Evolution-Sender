@@ -378,7 +378,7 @@ function crm_register_campaign_cpt() {
     );
 
     register_post_type( 'crm_sender_campaign', $args );
-    error_log('Custom Post Type "crm_sender_campaign" registrado.');
+    // error_log('Custom Post Type "crm_sender_campaign" registrado.');
 
 }
 add_action( 'init', 'crm_register_campaign_cpt' );
@@ -429,9 +429,9 @@ function crm_get_active_instances_options() {
             }
         }
     } else {
-        error_log("[crm_get_active_instances_options] Error al obtener instancias para select en CPT: " . (is_wp_error($api_response) ? $api_response->get_error_message() : 'Respuesta inválida'));
+        // error_log("[crm_get_active_instances_options] Error al obtener instancias para select en CPT: " . (is_wp_error($api_response) ? $api_response->get_error_message() : 'Respuesta inválida'));
     }
-        error_log("[crm_get_active_instances_options] Instancias activas para select CPT: " . print_r($instances_data, true));
+        // error_log("[crm_get_active_instances_options] Instancias activas para select CPT: " . print_r($instances_data, true));
     return $instances_data;
 }
 
@@ -445,7 +445,7 @@ function crm_get_etiquetas_options() {
     foreach ($tags as $slug => $name) {
         $options[esc_attr($slug)] = esc_html($name);
     }
-    error_log("[crm_get_etiquetas_options] Etiquetas para select CPT: " . print_r($options, true));
+    // error_log("[crm_get_etiquetas_options] Etiquetas para select CPT: " . print_r($options, true));
     return $options;
 }
 
@@ -595,13 +595,13 @@ function crm_campaign_segmentation_metabox_html( $post ) {
 function crm_save_campaign_meta_box_data( $post_id ) {
 
     if ( ! isset( $_POST['crm_campaign_meta_box_nonce'] ) || ! wp_verify_nonce( $_POST['crm_campaign_meta_box_nonce'], 'crm_save_campaign_meta_box_data' ) ) {
-        error_log("[crm_save_campaign_meta_box_data] Error al guardar meta de campaña {$post_id}: Nonce inválido.");
+        // error_log("[crm_save_campaign_meta_box_data] Error al guardar meta de campaña {$post_id}: Nonce inválido.");
         return;
     }
     if ( defined( 'DOING_AUTOSAVE' ) && DOING_AUTOSAVE ) return;
     if ( ! isset($_POST['post_type']) || 'crm_sender_campaign' !== $_POST['post_type'] ) return;
     if ( ! current_user_can( 'edit_post', $post_id ) ) {
-         error_log("[crm_save_campaign_meta_box_data] Error al guardar meta de campaña {$post_id}: Permiso denegado." );
+        //  error_log("[crm_save_campaign_meta_box_data] Error al guardar meta de campaña {$post_id}: Permiso denegado." );
         return;
     }
 
@@ -624,7 +624,7 @@ function crm_save_campaign_meta_box_data( $post_id ) {
     $media_url = isset( $_POST['crm_campaign_media_url'] ) ? esc_url_raw( wp_unslash( $_POST['crm_campaign_media_url'] ) ) : '';
     update_post_meta( $post_id, '_crm_campaign_media_url', $media_url );
 
-    error_log("[crm_save_campaign_meta_box_data] Metadatos de campaña guardados para Post ID: {$post_id}" );
+    // error_log("[crm_save_campaign_meta_box_data] Metadatos de campaña guardados para Post ID: {$post_id}" );
 }
 add_action( 'save_post_crm_sender_campaign', 'crm_save_campaign_meta_box_data' );
 
@@ -669,23 +669,23 @@ function crm_handle_campaign_scheduling_on_status_change( $new_status, $old_stat
     if ( $post->post_type !== 'crm_sender_campaign' ) return;
 
     $post_id = $post->ID;
-    error_log( "[CRON_SCHEDULER] transition_post_status para Campaña ID: {$post_id}. De '{$old_status}' a '{$new_status}'" );
+    // error_log( "[CRON_SCHEDULER] transition_post_status para Campaña ID: {$post_id}. De '{$old_status}' a '{$new_status}'" );
 
     $timestamp = wp_next_scheduled( 'crm_process_campaign_batch', array( $post_id ) );
     if ( $timestamp ) {
         wp_unschedule_event( $timestamp, 'crm_process_campaign_batch', array( $post_id ) );
-        error_log( "[CRON_SCHEDULER][{$post_id}] Tarea cron previa desprogramada." );
+        // error_log( "[CRON_SCHEDULER][{$post_id}] Tarea cron previa desprogramada." );
     }
 
     if ( $new_status === 'publish' ) {
         wp_schedule_single_event( time() + 5, 'crm_process_campaign_batch', array( $post_id ) );
-        error_log( "[CRON_SCHEDULER][{$post_id}] Estado es 'publish'. Primera ejecución de 'crm_process_campaign_batch' programada." );
+        // error_log( "[CRON_SCHEDULER][{$post_id}] Estado es 'publish'. Primera ejecución de 'crm_process_campaign_batch' programada." );
 
         if ($old_status !== 'publish') {
              update_post_meta( $post_id, '_crm_campaign_sent_count', 0 );
              update_post_meta( $post_id, '_crm_campaign_failed_count', 0 );
              update_post_meta( $post_id, '_crm_campaign_last_processed_user_id', 0 );
-             error_log( "[CRON_SCHEDULER][{$post_id}] Contadores reseteados." );
+            //  error_log( "[CRON_SCHEDULER][{$post_id}] Contadores reseteados." );
         }
     }
 }
@@ -696,15 +696,15 @@ add_action( 'transition_post_status', 'crm_handle_campaign_scheduling_on_status_
  * @param int $campaign_id ID del post de la campaña a procesar.
  */
 function crm_process_campaign_batch_callback( $campaign_id ) {
-    error_log( "[CRON] Iniciando procesamiento para Campaña ID: {$campaign_id}" );
+    // error_log( "[CRON] Iniciando procesamiento para Campaña ID: {$campaign_id}" );
 
     $campaign_post = get_post( $campaign_id );
     if ( ! $campaign_post || $campaign_post->post_type !== 'crm_sender_campaign' ) {
-        error_log( "[CRON][{$campaign_id}] Error: Post no encontrado o no es una campaña." );
+        // error_log( "[CRON][{$campaign_id}] Error: Post no encontrado o no es una campaña." );
         return;
     }
     if ( $campaign_post->post_status !== 'publish' ) {
-        error_log( "[CRON][{$campaign_id}] Campaña no está publicada (estado: {$campaign_post->post_status}). Deteniendo envío." );
+        // error_log( "[CRON][{$campaign_id}] Campaña no está publicada (estado: {$campaign_post->post_status}). Deteniendo envío." );
         return;
     }
 
@@ -716,11 +716,11 @@ function crm_process_campaign_batch_callback( $campaign_id ) {
     $instance_names   = get_post_meta( $campaign_id, '_crm_campaign_instance_names', true ); // Instancias seleccionadas
 
     if ( empty( $target_tags ) || ! is_array( $target_tags ) ) {
-        error_log( "[CRON][{$campaign_id}] Error: No hay etiquetas objetivo definidas o el formato es incorrecto." );
+        // error_log( "[CRON][{$campaign_id}] Error: No hay etiquetas objetivo definidas o el formato es incorrecto." );
         return;
     }
     if ( empty( $instance_names ) || ! is_array( $instance_names ) ) {
-        error_log( "[CRON][{$campaign_id}] Error: No hay instancias de envío seleccionadas." );
+        // error_log( "[CRON][{$campaign_id}] Error: No hay instancias de envío seleccionadas." );
         return;
     }
     $interval_seconds = absint( $interval_minutes ?: 5 ) * 60;
@@ -748,7 +748,7 @@ function crm_process_campaign_batch_callback( $campaign_id ) {
         );
     }
 
-    error_log( "[CRON][{$campaign_id}] WP_User_Query Args (antes de pre_get_users): " . print_r($user_query_args, true) );
+    // error_log( "[CRON][{$campaign_id}] WP_User_Query Args (antes de pre_get_users): " . print_r($user_query_args, true) );
 
     // Hook para añadir ID > last_processed_user_id
     $pre_get_users_callback = function( $query ) use ( $last_processed_user_id, &$pre_get_users_callback ) {
@@ -765,7 +765,7 @@ function crm_process_campaign_batch_callback( $campaign_id ) {
         if ($is_our_query) {
             global $wpdb;
             $query->query_where .= $wpdb->prepare( " AND {$wpdb->users}.ID > %d", $last_processed_user_id );
-            error_log("[CRON][pre_get_users] Condición ID > {$last_processed_user_id} añadida a la consulta.");
+            // error_log("[CRON][pre_get_users] Condición ID > {$last_processed_user_id} añadida a la consulta.");
         }
         // Remover la acción para no afectar otras queries
         remove_action( 'pre_get_users', $pre_get_users_callback );
@@ -774,15 +774,15 @@ function crm_process_campaign_batch_callback( $campaign_id ) {
 
     $user_query = new WP_User_Query( $user_query_args );
     $next_user = $user_query->get_results();
-    error_log( "[CRON][{$campaign_id}] WP_User_Query Results: " . print_r($next_user, true) );
+    // error_log( "[CRON][{$campaign_id}] WP_User_Query Results: " . print_r($next_user, true) );
 
     if ( empty( $next_user ) ) {
-        error_log( "[CRON][{$campaign_id}] No se encontraron más usuarios pendientes (después de ID: {$last_processed_user_id}). Campaña completada.");
+        // error_log( "[CRON][{$campaign_id}] No se encontraron más usuarios pendientes (después de ID: {$last_processed_user_id}). Campaña completada.");
         return;
     }
 
     $user_id_to_process = $next_user[0];
-    error_log( "[CRON][{$campaign_id}] Procesando siguiente usuario ID: {$user_id_to_process}" );
+    // error_log( "[CRON][{$campaign_id}] Procesando siguiente usuario ID: {$user_id_to_process}" );
 
     // Lógica de envío
     $send_result = null;
@@ -793,7 +793,7 @@ function crm_process_campaign_batch_callback( $campaign_id ) {
         // $mime_type = $filetype['type'] ?? null; // Ya no necesitamos esto aquí
 
         // if ($mime_type) { // Ya no necesitamos esta comprobación aquí
-             error_log( "[CRON][{$campaign_id}] Intentando enviar MEDIA a User ID {$user_id_to_process}. URL: {$media_url}");
+            //  error_log( "[CRON][{$campaign_id}] Intentando enviar MEDIA a User ID {$user_id_to_process}. URL: {$media_url}");
              // *** USA LA FUNCIÓN LOCAL ***
              $send_result = crm_campaign_send_whatsapp_media_message( $user_id_to_process, $media_url, $filename, $message_text, $instance_names ); // <-- $mime_type eliminado de la llamada
         // } else { // <-- Eliminado else huérfano
@@ -809,21 +809,21 @@ function crm_process_campaign_batch_callback( $campaign_id ) {
             );
             $processed_message = str_replace( array_keys($replacements), array_values($replacements), $message_text );
         }
-        error_log( "[CRON][{$campaign_id}] Intentando enviar TEXTO procesado a User ID {$user_id_to_process}." );
+        // error_log( "[CRON][{$campaign_id}] Intentando enviar TEXTO procesado a User ID {$user_id_to_process}." );
         // *** USA LA FUNCIÓN LOCAL ***
         $send_result = crm_campaign_send_whatsapp_message( $user_id_to_process, $processed_message, $instance_names );
     } else {
-         error_log( "[CRON][{$campaign_id}] Error: No hay ni mensaje ni media URL para enviar.");
+        //  error_log( "[CRON][{$campaign_id}] Error: No hay ni mensaje ni media URL para enviar.");
          $send_result = new WP_Error('no_content', 'No hay contenido para enviar.');
     }
 
     // Actualizar estado y contadores
     if ( is_wp_error( $send_result ) ) {
-        error_log( "[CRON][{$campaign_id}] Fallo al enviar a User ID {$user_id_to_process}: " . $send_result->get_error_message());
+        // error_log( "[CRON][{$campaign_id}] Fallo al enviar a User ID {$user_id_to_process}: " . $send_result->get_error_message());
         $failed_count = (int) get_post_meta( $campaign_id, '_crm_campaign_failed_count', true );
         update_post_meta( $campaign_id, '_crm_campaign_failed_count', $failed_count + 1 );
     } else {
-        error_log( "[CRON][{$campaign_id}] Envío exitoso (o API aceptó) a User ID {$user_id_to_process}." );
+        // error_log( "[CRON][{$campaign_id}] Envío exitoso (o API aceptó) a User ID {$user_id_to_process}." );
         $sent_count = (int) get_post_meta( $campaign_id, '_crm_campaign_sent_count', true );
         update_post_meta( $campaign_id, '_crm_campaign_sent_count', $sent_count + 1 );
         update_user_meta( $user_id_to_process, $user_meta_key_sent, true );

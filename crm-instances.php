@@ -171,11 +171,6 @@ function crm_render_instances_page_html() {
                         <span class="dashicons dashicons-camera"></span>
                     </button>
                 <# } #>
-                <# if ( data.status === 'open' ) { #>
-                    <button class="button button-secondary btn-disconnect" title="<?php esc_attr_e( 'Desconectar', CRM_EVOLUTION_SENDER_TEXT_DOMAIN ); ?>">
-                        <span class="dashicons dashicons-no"></span>
-                    </button>
-                <# } #>
                  <button class="button button-secondary btn-sync-contacts" title="<?php esc_attr_e( 'Sincronizar Contactos', CRM_EVOLUTION_SENDER_TEXT_DOMAIN ); ?>">
                     <span class="dashicons dashicons-admin-users"></span>
                 </button>
@@ -421,7 +416,7 @@ function crm_handle_instance_heartbeat_request( $response, $data, $screen_id ) {
     return $response;
 }
 // *** NUEVO LOG: Verificar si el add_filter se está ejecutando ***
-error_log("[Heartbeat PHP - INIT] Añadiendo filtro 'heartbeat_received' para 'crm_handle_instance_heartbeat_request'.");
+// error_log("[Heartbeat PHP - INIT] Añadiendo filtro 'heartbeat_received' para 'crm_handle_instance_heartbeat_request'.");
 add_filter( 'heartbeat_received', 'crm_handle_instance_heartbeat_request', 10, 3 );
 
 // =========================================================================
@@ -606,8 +601,8 @@ function crm_instances_process_single_jid($jid, $instanceName, $pushNameToUse = 
             'user_email'   => $email,
             'user_pass'    => $password,
             'display_name' => $display_name,
-            'first_name'   => $first_name, // <-- Añadido
-            'last_name'    => $last_name,  // <-- Añadido
+            'first_name'   => $first_name,
+            'last_name'    => $last_name,
             'role'         => 'subscriber',
         );
 
@@ -622,10 +617,15 @@ function crm_instances_process_single_jid($jid, $instanceName, $pushNameToUse = 
 
         // Guardar metadatos básicos
         update_user_meta($user_id, '_crm_whatsapp_jid', $jid);
+        update_user_meta($user_id, '_crm_is_group', false);
+        update_user_meta($user_id, '_crm_is_favorite', false);
+        update_user_meta($user_id, '_crm_instance_name', $instanceName);
+        // update_user_meta($user_id, '_crm_isBusiness', isset($profile_response['isBusiness']) ? (bool)$profile_response['isBusiness'] : false);
+        // update_user_meta($user_id, '_crm_description', $profile_response['description'] ?? null)
+        // update_user_meta($user_id, '_crm_website', $profile_response['website'] ?? null)
         update_user_meta($user_id, 'billing_phone', $number);
         update_user_meta($user_id, 'billing_first_name', $first_name);
         update_user_meta($user_id, 'billing_last_name', $last_name);
-        update_user_meta($user_id, '_crm_instance_name', $instanceName); // Guardar instancia para el Cron
 
         // Asignar la primera etiqueta definida
         $defined_tags = crm_instances_get_lifecycle_tags(); // Usar la función local

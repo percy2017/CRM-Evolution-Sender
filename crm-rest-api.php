@@ -1,10 +1,8 @@
 <?php
-/**
- * Archivo para registrar los endpoints de la API REST para CRM Evolution Sender.
- * Incluye el manejador de webhooks completo, procesando imágenes/videos desde Base64,
- * creando usuarios ('subscriber') si no existen, guardando avatares usando credenciales globales,
- * y asociando los chats al agente/dueño de la instancia.
- */
+
+require_once(ABSPATH . 'wp-admin/includes/media.php');
+require_once(ABSPATH . 'wp-admin/includes/file.php');
+require_once(ABSPATH . 'wp-admin/includes/image.php');
 
 // Si este archivo es llamado directamente, abortar.
 if ( ! defined( 'WPINC' ) ) {
@@ -12,9 +10,7 @@ if ( ! defined( 'WPINC' ) ) {
 }
 
 /**
- * Registra los endpoints de la API REST del plugin.
- *
- * Se engancha a 'rest_api_init'.
+ * Registra los endpoints de la API REST del plugin
  */
 function crm_evolution_register_rest_routes() {
 
@@ -30,20 +26,14 @@ function crm_evolution_register_rest_routes() {
 add_action( 'rest_api_init', 'crm_evolution_register_rest_routes' );
 
 
-
-
 /**
  * Función Callback para manejar los datos recibidos en el endpoint del webhook.
- *
- * @param WP_REST_Request $request Objeto de la petición REST. Contiene los datos enviados.
- * @return WP_REST_Response Respuesta que se enviará de vuelta a la API Evolution.
  */
 function crm_evolution_webhook_handler_callback( WP_REST_Request $request ) {
 
     // Obtener los datos JSON enviados por Evolution API
     $data = $request->get_json_params();
-    // Log inicial más conciso
-    error_log('[Webhook] Datos recibidos: ' . json_encode($data)); // Usar json_encode para un log más limpio
+    // error_log('[Webhook] Datos recibidos: ' . json_encode($data));
 
     // Extraer Evento e Instancia
     $event = isset($data['event']) ? $data['event'] : 'evento_desconocido';
@@ -54,9 +44,8 @@ function crm_evolution_webhook_handler_callback( WP_REST_Request $request ) {
     switch ($event) {
         case 'messages.upsert':
             $message_payload = $data['data'] ?? null;
-            error_log("[Webhook][{$instance}][messages.upsert] Procesando payload...");
             $instance_name = sanitize_text_field($data['instance'] ?? 'desconocida');
-            $api_sender_jid = sanitize_text_field($data['sender'] ?? null);
+            // $api_sender_jid = sanitize_text_field($data['sender'] ?? null);
 
             if (!$message_payload || !isset($message_payload['key'], $message_payload['messageTimestamp'])) {
                 error_log("Error: Payload 'data' inválido o incompleto en 'messages.upsert'.");
@@ -68,56 +57,34 @@ function crm_evolution_webhook_handler_callback( WP_REST_Request $request ) {
 
             // Datos clave de identificación
             $remote_jid = sanitize_text_field($key_info['remoteJid'] ?? '');
-            $from_me = (bool) ($key_info['fromMe'] ?? false);
-            $message_id_wa = sanitize_text_field($key_info['id'] ?? '');
-            $participant_jid = isset($key_info['participant']) ? sanitize_text_field($key_info['participant']) : null; // Para grupos
-            $is_group_message = (strpos($remote_jid, '@g.us') !== false);
-
-            // Datos del usuario/contacto
-            $push_name = isset($message_payload['pushName']) ? sanitize_text_field($message_payload['pushName']) : null;
-
-            // Timestamp
-            $timestamp_wa = (int) $message_payload['messageTimestamp'];
-
-            // Determinar JID del remitente y destinatario REALES
-            $sender_real_jid = $from_me ? $api_sender_jid : ($is_group_message ? $participant_jid : $remote_jid);
-            $recipient_real_jid = $from_me ? $remote_jid : $api_sender_jid;
-
-            // --- FIN: Extracción Detallada ---
-
-            // --- INICIO: Procesar Usuario (Contacto) ---
-            // El JID a buscar/crear es siempre el 'remote_jid' si es mensaje individual,
-            // o el 'participant_jid' si es un mensaje de grupo entrante.
-            // Si es un mensaje saliente a grupo, usamos 'remote_jid' (el grupo) como referencia, aunque no creará usuario.
-            $jid_for_user_processing = $is_group_message ? ($from_me ? $remote_jid : $participant_jid) : $remote_jid;
-
-            if (empty($jid_for_user_processing)) {
-                 error_log("[Webhook][{$instance}][messages.upsert] Error: No se pudo determinar el JID para procesar el usuario.");
-                 break;
-            }
 
             // Usamos crm_process_single_jid directamente para el contacto.
-            // Pasamos pushName solo si es un mensaje entrante.
-            $contact_user_id = crm_process_single_jid($jid_for_user_processing, $instance_name, $push_name, !$from_me); // <--- AQUÍ SE PROCESA EL USUARIO
-
-            if ($contact_user_id === 0 && !$is_group_message) {
-                error_log("[Webhook][{$instance}][messages.upsert] Error: No se pudo encontrar o crear el usuario para JID '{$jid_for_user_processing}'. No se guardará el mensaje.");
+            $contact_user_id = crm_process_single_jid($remote_jid, $instance_name);
+            error_log("[Webhook] author: ".$contact_user_id);
+            if ($contact_user_id === 0) {
+                // salir por que no hay usuario a quien asociar
                 break;
             }
-            error_log("[Webhook][{$instance}][messages.upsert] Usuario contacto procesado. JID: '{$jid_for_user_processing}', User ID: {$contact_user_id}");
-             // Por ahora, si es grupo y falla, el post_author será 0 (Admin).
-            //crm_log("Usuario contacto procesado. JID: '{$jid_for_user_processing}', User ID: {$contact_user_id}", 'INFO');
             // --- FIN: Procesar Usuario ---
 
+            error_log("[Webhook] Inicio de registrando con el author: ".$contact_user_id);
+
             // --- INICIO: Extraer Contenido del Mensaje ---
+            $message_id_wa = sanitize_text_field($key_info['id'] ?? '');
+            $timestamp_wa = (int) $message_payload['messageTimestamp'];
+            $from_me = (bool) ($key_info['fromMe'] ?? false);
             $message_type = 'unknown';
             $message_text = null;
             $media_caption = null;
-            $media_mimetype = null;
-            $base64_data = $data['data']['message']['base64'] ?? null; // Base64 está DENTRO de data.message
-            error_log("[Webhook][{$instance}][messages.upsert] Base64 encontrado: " . ($base64_data ? 'Sí' : 'No'));
-
-            // Extraer tipo y contenido específico (simplificado, necesita más casos)
+            $media_mimetype = null; 
+            $base64_data = $data['data']['message']['base64'] ?? null;
+            
+            // para grupos
+            $participant =  sanitize_text_field($key_info['participant'] ?? '');
+            $pushname = sanitize_text_field($message_payload['pushName'] ?? 'Desconocido');
+            // error_log("PushName ---------- ".$message_payload['pushName']);
+            // error_log("participant ---------- ".sanitize_text_field($key_info['participant']));
+            // Extraer tipo y contenido específico
             if (isset($message_info['conversation'])) {
                 $message_type = 'text';
                 $message_text = $message_info['conversation'];
@@ -138,40 +105,34 @@ function crm_evolution_webhook_handler_callback( WP_REST_Request $request ) {
                 $raw_mimetype = $message_info['audioMessage']['mimetype'] ?? 'audio/ogg';
                 $mime_parts = explode(';', $raw_mimetype);
                 $media_mimetype = trim($mime_parts[0]);
-            } elseif (isset($message_info['documentWithCaptionMessage'])) { // <-- NUEVO BLOQUE PARA DOCUMENTO CON CAPTION
+            } elseif (isset($message_info['documentWithCaptionMessage'])) {
                 $message_type = 'document';
-                // Acceder al documentMessage anidado
                 $doc_msg = $message_info['documentWithCaptionMessage']['message']['documentMessage'] ?? null;
                 if ($doc_msg) {
                     $media_caption = $doc_msg['caption'] ?? null;
                     $media_mimetype = $doc_msg['mimetype'] ?? 'application/octet-stream';
                     $filename = $doc_msg['fileName'] ?? null;
-                    $message_text = $media_caption ?: $filename; // Usar caption o filename como texto
+                    $message_text = $media_caption ?: $filename;
                 }
-            } elseif (isset($message_info['documentMessage'])) { // <-- Bloque existente para documento SIN caption
+            } elseif (isset($message_info['documentMessage'])) {
                 $message_type = 'document';
                 $media_caption = $message_info['documentMessage']['caption'] ?? null;
                 $media_mimetype = $message_info['documentMessage']['mimetype'] ?? 'application/octet-stream'; // Default genérico
-                $message_text = $media_caption ?: ($message_info['documentMessage']['fileName'] ?? null); // Usar caption o filename
+                $message_text = $media_caption ?: ($message_info['documentMessage']['fileName'] ?? null);
             }
-            // ... añadir más tipos: audio, document, location, etc.
-            error_log("[Webhook][{$instance}][messages.upsert] Tipo de mensaje detectado: {$message_type}. Texto: " . ($message_text ? 'Sí' : 'No') . ". Caption: " . ($media_caption ? 'Sí' : 'No'));
 
             // Si hay base64 pero no se detectó tipo media, intentar deducir (o marcar como 'file')
             if ($base64_data && $message_type === 'unknown') {
-                 $message_type = 'file'; // Tipo genérico si hay base64 no identificado
-                 // Podríamos intentar obtener mimetype de $message_info si existe alguna clave media no manejada
+                 $message_type = 'file';
             }
             // --- FIN: Extraer Contenido ---
 
             // --- INICIO: Preparar y Guardar Mensaje ---
-            if ($message_type !== 'unknown' || $base64_data) { // Solo guardar si es un tipo conocido o tiene adjunto
+            if ($message_type !== 'unknown' || $base64_data) { 
                 error_log("[Webhook][{$instance}][messages.upsert] Preparando datos para guardar mensaje ID: {$message_id_wa}");
                 $message_data_to_save = [
-                    'contact_user_id'     => $contact_user_id, // ID del usuario contacto (o 0 si es grupo y falló)
+                    'contact_user_id'     => $contact_user_id,
                     'instance_name'       => $instance_name,
-                    'sender_jid'          => $sender_real_jid,
-                    'recipient_jid'       => $recipient_real_jid,
                     'is_outgoing'         => $from_me,
                     'message_id_wa'       => $message_id_wa,
                     'timestamp_wa'        => $timestamp_wa,
@@ -180,8 +141,8 @@ function crm_evolution_webhook_handler_callback( WP_REST_Request $request ) {
                     'base64_data'         => $base64_data,
                     'media_mimetype'      => $media_mimetype,
                     'media_caption'       => $media_caption,
-                    'is_group_message'    => $is_group_message,
-                    'participant_jid'     => $participant_jid,
+                    'participant'     => $participant,
+                    'pushname'     => $pushname
                 ];
 
                 $save_result = crm_save_chat_message($message_data_to_save);
@@ -240,28 +201,14 @@ function crm_evolution_webhook_handler_callback( WP_REST_Request $request ) {
 
 }
 
-/**
- * Procesa un JID individual: busca un usuario WP existente o crea uno nuevo si no existe.
- * Si lo crea, guarda metadatos (JID, billing_phone, primera etiqueta) y llama a guardar avatar.
- * Si ya existe, no hace nada más.
- *
- * @param string $jid El JID a procesar (ej: "59171146267@s.whatsapp.net").
- * @param string $instanceName Nombre de la instancia API (necesario para obtener avatar).
- * @param string|null $pushNameToUse El pushName recibido en el webhook.
- * @param bool $usePushName Indica si se debe usar $pushNameToUse para el display_name (solo para mensajes entrantes del remoteJid).
- * @return int El ID del usuario WP encontrado o creado, o 0 si falla o no es un JID de usuario.
- */
-function crm_process_single_jid($jid, $instanceName, $pushNameToUse = null, $usePushName = false) {
-    // Validar que sea un JID de usuario individual
-    if (strpos($jid, '@s.whatsapp.net') === false) {
-        //crm_log("JID '{$jid}' no es un usuario individual (@s.whatsapp.net). Ignorando.", 'DEBUG');
-        return 0;
-    }
+// creacion de nuevo usuario si noexiste
+function crm_process_single_jid($remote_jid, $instanceName) {
 
+    error_log("[Webhook] iniciendo  el registro para: ".$remote_jid." - ".$instanceName);
     // Buscar usuario existente por JID en user_meta
     $user_query = new WP_User_Query(array(
         'meta_key'   => '_crm_whatsapp_jid',
-        'meta_value' => $jid,
+        'meta_value' => $remote_jid,
         'number'     => 1, // Solo necesitamos uno
         'fields'     => 'ID', // Solo obtener el ID
     ));
@@ -270,212 +217,218 @@ function crm_process_single_jid($jid, $instanceName, $pushNameToUse = null, $use
     $user_id = !empty($users) ? $users[0] : 0;
 
     if ($user_id) {
-        // Si el usuario ya existe, no hacemos NADA más. Ni avatar, ni actualizar datos.
-        //crm_log("Usuario encontrado para JID '{$jid}' con User ID: {$user_id}. No se realizarán más acciones.", 'INFO');
+        error_log("[Webhook] retornando el usuario encontrado: ".$user_id);
         return $user_id; // Salir inmediatamente
 
     } else {
-        //crm_log("Usuario NO encontrado para JID '{$jid}'. Intentando crear uno nuevo.", 'INFO');
 
-        // Extraer número del JID para username/email placeholder
-        $number = strstr($jid, '@', true); // Obtiene la parte antes del @
-        if (!$number) {
-            //crm_log("Error: No se pudo extraer el número del JID '{$jid}'", 'ERROR');
-            return 0;
-        }
+        if (strpos($remote_jid, '@s.whatsapp.net') === false) {
+            error_log("[Webhook] Entro a Grupo: ".strpos($remote_jid, '@s.whatsapp.net'));
+            if (strpos($remote_jid, '@g.us') !== false) {
+                error_log("[Webhook] Procesando JID de grupo: " . $remote_jid);
+        
+                $group_info_api_data = array('groupJid' => $remote_jid);
+                $group_info_response = crm_evolution_api_request_v2("/group/findGroupInfos/{$instanceName}", $group_info_api_data, 'GET', $instanceName);
+        
+                $group_name = $remote_jid; // Nombre por defecto si no se puede obtener de la API
+                $group_picture_url = null;
+        
+                if (!is_wp_error($group_info_response) && isset($group_info_response['id']) && $group_info_response['id'] === $remote_jid) {
+                    if (!empty($group_info_response['subject'])) {
+                        $group_name = sanitize_text_field($group_info_response['subject']);
+                        error_log("[Webhook] Nombre del grupo obtenido de API: " . $group_name);
+                    } else {
+                        error_log("[Webhook] Nombre del grupo (subject) no encontrado en la respuesta de la API para: " . $remote_jid);
+                    }
+                    if (!empty($group_info_response['pictureUrl'])) {
+                        $group_picture_url = esc_url_raw($group_info_response['pictureUrl']);
+                        error_log("[Webhook] Picture URL del grupo obtenida de API: " . $group_picture_url);
+                    }
+                } else {
+                    $error_message = is_wp_error($group_info_response) ? $group_info_response->get_error_message() : 'Respuesta inesperada o JID no coincide.';
+                    error_log("[Webhook] Error al obtener información del grupo {$remote_jid} desde la API: " . $error_message);
+                }
+                      
+                // El grupo no existe, lo creamos
+                $group_login = 'group_' . preg_replace('/[^0-9]/', '', $remote_jid);
+                $group_email = preg_replace('/[^0-9]/', '', $remote_jid) . '@g.whatsapp.placeholder'; // Email único
+                
+                $user_data = array(
+                    'user_login'    => $group_login,
+                    'user_pass'     => wp_generate_password(12, true),
+                    'user_email'    => $group_email,
+                    'display_name'  => $group_name,
+                    'first_name'    => $group_name, // Usar el nombre del grupo
+                    'role'          => 'subscriber' // O el rol que consideres apropiado
+                );
+                $group_user_id = wp_insert_user($user_data);
+    
+                if (is_wp_error($group_user_id)) {
+                    error_log('[Webhook] Error al crear usuario para el grupo ' . $remote_jid . ': ' . $group_user_id->get_error_message());
+                    return 0; // Falló la creación del usuario
+                }
+                error_log("[Webhook] Usuario WP creado para el grupo {$remote_jid} con ID: {$group_user_id} y nombre: {$group_name}");
+                update_user_meta($group_user_id, '_crm_is_group', true);
+                update_user_meta($user_id, '_crm_is_favorite', false);
+                update_user_meta($group_user_id, '_crm_whatsapp_jid', $remote_jid);
+                update_user_meta($group_user_id, '_crm_instance_name', $instanceName);
 
-        // Generar datos para el nuevo usuario
-        $username = 'wa_' . $number;
-        // Asegurar que el username sea único (WordPress lo hace, pero podemos añadir un sufijo si falla)
-        $email = $number . '@whatsapp.placeholder'; // Email placeholder
-        $password = wp_generate_password(12, true); // Contraseña segura
+                // Asignar la PRIMERA etiqueta definida como defecto al crear desde webhook
+                $defined_tags = crm_get_lifecycle_tags();
+                if (!empty($defined_tags)) {
+                    $default_tag_key = array_key_first($defined_tags);
+                    update_user_meta($group_user_id, '_crm_lifecycle_tag', $default_tag_key);
+                }
+        
+                // Manejar la descarga y asignación del avatar del grupo si $group_picture_url no es null
+                if ($group_picture_url && $group_user_id && !is_wp_error($group_user_id)) {
+                    error_log("[Webhook] Intentando descargar avatar para grupo {$remote_jid} desde: {$group_picture_url}");
+                    $tmp = download_url($group_picture_url);
 
-        // Determinar el nombre a mostrar
-        $display_name = ($usePushName && !empty($pushNameToUse)) ? $pushNameToUse : $username;
+                    if (is_wp_error($tmp)) {
+                        error_log("[Webhook] Error al descargar avatar para grupo {$remote_jid}: " . $tmp->get_error_message());
+                        @unlink($tmp); // Limpiar si se creó un archivo temporal parcial
+                    } else {
+                        $file_array = array();
+                        preg_match('/[^\/\&\?]+\.\w{3,4}(?=([\?&].*$|$))/i', $group_picture_url, $matches);
+                        $file_name = !empty($matches[0]) ? sanitize_file_name($matches[0]) : sanitize_file_name("group_avatar_" . preg_replace('/[^0-9]/', '', $remote_jid) . ".jpg");
 
-        $user_data = array(
-            'user_login'   => $username,
-            'user_email'   => $email,
-            'user_pass'    => $password,
-            'display_name' => $display_name,
-            'role'         => 'subscriber', // Rol por defecto
-        );
+                        $file_array['name'] = $file_name;
+                        $file_array['tmp_name'] = $tmp;
 
-        // Intentar crear el usuario
-        $user_id = wp_insert_user($user_data);
+                        $group_display_name = get_userdata($group_user_id)->display_name;
+                        $desc = sprintf(__('Avatar para el grupo %s', CRM_EVOLUTION_SENDER_TEXT_DOMAIN), $group_display_name);
 
-        if (is_wp_error($user_id)) {
-            //crm_log("Error al crear usuario para JID '{$jid}': " . $user_id->get_error_message(), 'ERROR');
-            // Intentar con un username ligeramente diferente si el error es por duplicado
-            if ('existing_user_login' === $user_id->get_error_code()) {
-                 $username .= '_' . time(); // Añadir timestamp para unicidad
-                 $user_data['user_login'] = $username;
-                 $user_id = wp_insert_user($user_data);
-                 if (is_wp_error($user_id)) {
-                     //crm_log("Error al RE-intentar crear usuario para JID '{$jid}': " . $user_id->get_error_message(), 'ERROR');
-                     return 0;
-                 }
+                        $attachment_id = media_handle_sideload($file_array, 0, $desc); // 0 = no asociado a un post específico
+
+                        @unlink($tmp); // Limpiar archivo temporal después de sideload
+
+                        if (is_wp_error($attachment_id)) {
+                            error_log("[Webhook] Error al guardar avatar para grupo {$remote_jid} en Media Library: " . $attachment_id->get_error_message());
+                        } else {
+                            update_user_meta($group_user_id, '_crm_avatar_attachment_id', $attachment_id);
+                            error_log("[Webhook] Avatar para grupo {$remote_jid} guardado con éxito. Attachment ID: {$attachment_id}");
+                        }
+                    }
+                } elseif ($group_picture_url && (is_wp_error($group_user_id) || !$group_user_id)) {
+                    error_log("[Webhook] No se intentó descargar avatar para grupo {$remote_jid} porque group_user_id no es válido.");
+                }
+        
+                return $group_user_id; // Retornamos el ID del usuario WP del grupo
+        
             } else {
-                return 0; // Otro error al crear
+                // No es @s.whatsapp.net ni @g.us, es un JID desconocido o no manejado
+                error_log("[Webhook] JID no reconocido como individual ni como grupo: " . $remote_jid);
+                return 0; // O manejar como error de otra forma
             }
-        }
+        }else{
+            // si es contacto
+            $profile_response = crm_evolution_api_request('POST', "/chat/fetchProfile/{$instanceName}", ['number' => $remote_jid]); // Usa API Key global
+            $number = strstr($remote_jid, '@', true);
+
+            // Generar datos para el nuevo usuario
+            $username = 'wa_' . $number;
+            $email = $number . '@whatsapp.placeholder';
+            $password = wp_generate_password(12, true);
+
+            $first_name = '';
+            $last_name = '';
+            $name_parts = explode(' ', $profile_response['name'], 2);
+            if (count($name_parts) > 1) {
+                $first_name = $name_parts[0];
+                $last_name = $name_parts[1];
+            } else {
+                $first_name = $profile_response['name'] ?? 'Desconocido';
+            }
+
+            $user_data = array(
+                'user_login'   => $username,
+                'user_email'   => $email,
+                'first_name'   => $first_name,
+                'last_name'    => $last_name,
+                'user_pass'    => $password,
+                'display_name' => $username,
+                'role'         => 'subscriber',
+            );
+
+            // Intentar crear el usuario
+            $user_id = wp_insert_user($user_data);
+
+            if (is_wp_error($user_id)) {
+                error_log("[Webhook] error: ".$user_id->get_error_code());
+                if ('existing_user_login' === $user_id->get_error_code()) {
+                    $username .= '_' . time();
+                    $user_data['user_login'] = $username;
+                    $user_id = wp_insert_user($user_data);
+                    if (is_wp_error($user_id)) {
+                        return 0;
+                    }
+                } else {
+                    return 0; // Otro error al crear
+                }
+            }
 
         // Si se creó correctamente, guardar metadatos
-        update_user_meta($user_id, '_crm_whatsapp_jid', $jid);
-        // Guardar también el número para compatibilidad con WooCommerce
+        update_user_meta($user_id, '_crm_whatsapp_jid', $remote_jid);
+        update_user_meta($user_id, '_crm_is_group', false);
+        update_user_meta($user_id, '_crm_is_favorite', false);
+        update_user_meta($user_id, '_crm_instance_name', $instanceName);
+        update_user_meta($user_id, '_crm_isBusiness', isset($profile_response['isBusiness']) ? (bool)$profile_response['isBusiness'] : false);
+        update_user_meta($user_id, '_crm_description', $profile_response['description'] ?? null);
+        update_user_meta($user_id, '_crm_website', $profile_response['website'] ?? null);
         update_user_meta($user_id, 'billing_phone', $number);
+        update_user_meta($user_id, 'billing_first_name', $first_name);
+        update_user_meta($user_id, 'billing_last_name', $last_name);
+        update_user_meta($user_id, 'billing_email', $email);
 
+        
         // Asignar la PRIMERA etiqueta definida como defecto al crear desde webhook
-        $defined_tags = crm_get_lifecycle_tags(); // Obtener etiquetas definidas en ajustes
+        $defined_tags = crm_get_lifecycle_tags();
         if (!empty($defined_tags)) {
-            $default_tag_key = array_key_first($defined_tags); // Obtener la clave de la primera etiqueta
+            $default_tag_key = array_key_first($defined_tags);
             update_user_meta($user_id, '_crm_lifecycle_tag', $default_tag_key);
-            //crm_log("Nuevo usuario creado con User ID: {$user_id} para JID '{$jid}'. Username: {$username}, Display Name: {$display_name}. Etiqueta por defecto asignada: '{$default_tag_key}'", 'INFO');
-        } else {
-            //crm_log("Nuevo usuario creado con User ID: {$user_id} para JID '{$jid}'. Username: {$username}, Display Name: {$display_name}. No se asignó etiqueta por defecto (ninguna definida).", 'INFO');
         }
 
-        // Si llegamos aquí, significa que el usuario se acaba de CREAR.
-        // Solo en este caso intentamos obtener/guardar el avatar por primera vez.
-        if ($user_id) { // Asegurarse de que la creación fue exitosa
-            crm_fetch_and_save_avatar($user_id, $jid, $instanceName);
+        // Descargar el archivo a una ubicación temporal
+        $avatar_url = $profile_response['picture'];
+        $tmp = download_url($avatar_url);
+        if (is_wp_error($tmp)) {
+            @unlink($tmp);
+            return false;
         }
 
-    } // Fin del else (usuario no encontrado)
+        $file_array = array();
+        // Extraer nombre de archivo de la URL o generar uno
+        preg_match('/[^\/\&\?]+\.\w{3,4}(?=([\?&].*$|$))/i', $avatar_url, $matches);
+        $file_name = !empty($matches[0]) ? sanitize_file_name($matches[0]) : sanitize_file_name("avatar_{$user_id}.jpg");
 
-    return $user_id;
+        $file_array['name'] = $file_name;
+        $file_array['tmp_name'] = $tmp;
+
+        // Descripción para el adjunto (opcional)
+        $desc = sprintf(__('Avatar para %s', CRM_EVOLUTION_SENDER_TEXT_DOMAIN), get_userdata($user_id)->display_name);
+
+        // Subir el archivo a la biblioteca de medios
+        $attachment_id = media_handle_sideload($file_array, 0, $desc);
+
+        // Limpiar archivo temporal
+        @unlink($tmp);
+
+        if (is_wp_error($attachment_id)) {
+            return false;
+        }
+        update_user_meta($user_id, '_crm_avatar_attachment_id', $attachment_id);
+        }
+        return $user_id;
+    }
 }
 
-/**
- * Obtiene la URL del avatar desde Evolution API, lo descarga y lo guarda en la Media Library,
- * asociándolo al usuario WP, **solo si el usuario no tiene ya un avatar guardado**.
- *
- * @param int    $user_id      ID del usuario de WordPress.
- * @param string $jid          JID del contacto de WhatsApp.
- * @param string $instanceName Nombre de la instancia de Evolution API.
- * @return bool True si el usuario ya tenía avatar o si se guardó uno nuevo correctamente, False en caso de error.
- */
-function crm_fetch_and_save_avatar($user_id, $jid, $instanceName) {
-    // *** INICIO: Verificar si ya existe un avatar para este usuario ***
-    $existing_attachment_id = get_user_meta($user_id, '_crm_avatar_attachment_id', true);
-    if ($existing_attachment_id) {
-        //crm_log("El usuario User ID: {$user_id} ya tiene un avatar asociado (Attachment ID: {$existing_attachment_id}). No se buscará ni actualizará.", 'INFO');
-        return true; // Consideramos éxito ya que el objetivo (tener un avatar) se cumple.
-    }
-
-    //crm_log("El usuario User ID: {$user_id} NO tiene avatar guardado. Procediendo a buscar uno.", 'INFO');
-
-    // 1. Llamar a la API de Evolution para obtener la URL de la imagen de perfil
-    $endpoint = "/chat/fetchProfilePictureUrl/{$instanceName}";
-    $body = ['number' => $jid];
-
-    $api_response = crm_evolution_api_request('POST', $endpoint, $body, null); // Usar POST y pasar el body
-
-    if (is_wp_error($api_response)) {
-        //crm_log("Error API al obtener URL del avatar para JID {$jid}: " . $api_response->get_error_message(), 'ERROR');
-        return false;
-    }
-
-    if (empty($api_response['profilePictureUrl'])) {
-        //crm_log("La API no devolvió una URL de avatar para JID {$jid}. Respuesta: " . json_encode($api_response), 'WARN');
-        // No hacemos nada más si no hay URL, ya que no había avatar previo.
-        return false;
-    }
-
-    $avatar_url = $api_response['profilePictureUrl'];
-    //crm_log("URL del avatar obtenida para JID {$jid}: {$avatar_url}", 'DEBUG');
-
-    // 2. Descargar la imagen desde la URL obtenida
-    // Necesitamos incluir los archivos necesarios para media_handle_sideload
-    require_once(ABSPATH . 'wp-admin/includes/media.php');
-    require_once(ABSPATH . 'wp-admin/includes/file.php');
-    require_once(ABSPATH . 'wp-admin/includes/image.php');
-
-    // Descargar el archivo a una ubicación temporal
-    $tmp = download_url($avatar_url);
-
-    if (is_wp_error($tmp)) {
-        //crm_log("Error al descargar el avatar desde {$avatar_url}: " . $tmp->get_error_message(), 'ERROR');
-        @unlink($tmp); // Eliminar archivo temporal si existe
-        return false;
-    }
-
-    // 3. Preparar y guardar la imagen en la Media Library
-    $file_array = array();
-    // Extraer nombre de archivo de la URL o generar uno
-    preg_match('/[^\/\&\?]+\.\w{3,4}(?=([\?&].*$|$))/i', $avatar_url, $matches);
-    $file_name = !empty($matches[0]) ? sanitize_file_name($matches[0]) : sanitize_file_name("avatar_{$user_id}.jpg");
-
-    $file_array['name'] = $file_name;
-    $file_array['tmp_name'] = $tmp;
-
-    // Descripción para el adjunto (opcional)
-    $desc = sprintf(__('Avatar para %s', CRM_EVOLUTION_SENDER_TEXT_DOMAIN), get_userdata($user_id)->display_name);
-
-    // Subir el archivo a la biblioteca de medios
-    $attachment_id = media_handle_sideload($file_array, 0, $desc); // 0 significa que no está asociado a ningún post específico
-
-    // Limpiar archivo temporal
-    @unlink($tmp);
-
-    if (is_wp_error($attachment_id)) {
-        //crm_log("Error al guardar el avatar en la Media Library: " . $attachment_id->get_error_message(), 'ERROR');
-        return false;
-    }
-
-    // 4. Guardar el ID del nuevo adjunto en el metadato del usuario.
-    // No necesitamos eliminar el anterior porque la verificación inicial asegura que no había uno.
-    update_user_meta($user_id, '_crm_avatar_attachment_id', $attachment_id);
-    //crm_log("Avatar guardado con éxito en Media Library (Attachment ID: {$attachment_id}) y asociado al User ID: {$user_id}", 'INFO');
-
-    return true;
-}
-
-
-/**
- * Función principal llamada desde el webhook para encontrar o crear usuarios para remoteJid y senderJid.
- *
- * @param string $remoteJid JID del contacto.
- * @param string $senderJid JID de nuestra instancia.
- * @param string|null $pushName Nombre del contacto (si es mensaje entrante).
- * @param bool $fromMe Indica si el mensaje original era saliente.
- * @param string $instanceName Nombre de la instancia que recibió el webhook.
- * @return array Array con ['remote_user_id' => ID, 'sender_user_id' => ID]. IDs pueden ser 0 si fallan.
- */
-function crm_find_or_create_user_with_avatar($remoteJid, $senderJid, $pushName, $fromMe, $instanceName) {
-    $user_ids = [
-        'remote_user_id' => crm_process_single_jid($remoteJid, $instanceName, $pushName, !$fromMe), // Usar pushName si NO es fromMe (entrante)
-        'sender_user_id' => crm_process_single_jid($senderJid, $instanceName, null, false), // Nunca usar pushName para el sender
-    ];
-
-    return $user_ids;
-}
 
 /**
  * Guarda un mensaje de chat como un CPT 'crm_chat'.
- * Maneja texto y archivos adjuntos (Base64).
- *
- * @param array $message_data Datos del mensaje extraídos del webhook. Debe incluir:
- *   'contact_user_id'     => (int) ID del usuario WP del contacto.
- *   'instance_name'       => (string) Nombre de la instancia.
- *   'sender_jid'          => (string) JID del remitente real (puede ser el contacto o la instancia).
- *   'recipient_jid'       => (string) JID del destinatario real (puede ser la instancia o el contacto/grupo).
- *   'is_outgoing'         => (bool) True si el mensaje fue enviado desde la instancia.
- *   'message_id_wa'       => (string) ID único del mensaje de WhatsApp.
- *   'timestamp_wa'        => (int) Timestamp UNIX del mensaje.
- *   'message_type'        => (string) Tipo de mensaje ('text', 'image', 'video', etc.).
- *   'message_text'        => (string|null) Contenido del mensaje de texto.
- *   'base64_data'         => (string|null) Datos del archivo adjunto en Base64.
- *   'media_mimetype'      => (string|null) MIME type del archivo adjunto.
- *   'media_caption'       => (string|null) Leyenda del archivo adjunto.
- *   'is_group_message'    => (bool) True si es un mensaje de grupo.
- *   'participant_jid'     => (string|null) JID del participante que envió el mensaje en un grupo.
- *
- * @return int|WP_Error El ID del post creado o WP_Error en caso de fallo.
  */
 function crm_save_chat_message( $message_data ) {
     error_log( '[crm_save_chat_message] Iniciando guardado para WA ID: ' . ($message_data['message_id_wa'] ?? 'N/A') );
-    //crm_log( 'Iniciando crm_save_chat_message con datos:', 'DEBUG', $message_data );
 
     // --- INICIO: Comprobación de Duplicados ---
     if ( ! empty( $message_data['whatsapp_message_id'] ) ) {
@@ -499,8 +452,8 @@ function crm_save_chat_message( $message_data ) {
     }
     // --- FIN: Comprobación de Duplicados ---
 
-    $attachment_id = null;
 
+    $attachment_id = null;
     // 1. Procesar archivo adjunto si existe
     if ( ! empty( $message_data['base64_data'] ) && ! empty( $message_data['media_mimetype'] ) ) {
         error_log( "[crm_save_chat_message] Intentando procesar archivo adjunto Base64 (MIME: {$message_data['media_mimetype']})." );
@@ -520,50 +473,31 @@ function crm_save_chat_message( $message_data ) {
         }
     }
 
-    // 2. Preparar datos para wp_insert_post
-    $post_title = sprintf(
-        '%s %s %s (%s)',
-        $message_data['is_outgoing'] ? 'Enviado a:' : 'Recibido de:',
-        $message_data['is_group_message'] ? ($message_data['participant_jid'] ?? $message_data['sender_jid']) : $message_data['sender_jid'],
-        $message_data['is_group_message'] ? "en {$message_data['recipient_jid']}" : '',
-        wp_date( 'Y-m-d H:i', $message_data['timestamp_wa'] )
-    );
-
     $post_content = $message_data['message_text'] ?? ($message_data['media_caption'] ?? ''); // Usar caption si no hay texto
 
     $post_data = array(
         'post_type'     => 'crm_chat',
         'post_status'   => 'publish',
-        'post_author'   => $message_data['contact_user_id'], // Asociar al usuario contacto
-        'post_title'    => sanitize_text_field( $post_title ),
-        'post_content'  => wp_kses_post( $post_content ), // Permitir HTML seguro básico
+        'post_author'   => $message_data['contact_user_id'],
+        'post_title'    => 'Mensaje de: '.$message_data['contact_user_id'],
+        'post_content'  => wp_kses_post( $post_content ),
         'post_date_gmt' => gmdate( 'Y-m-d H:i:s', $message_data['timestamp_wa'] ),
     );
 
-    // 3. Insertar el post
+    // Insertar el post
     $post_id = wp_insert_post( $post_data, true ); // true para devolver WP_Error si falla
-
     if ( is_wp_error( $post_id ) ) {
         error_log( '[crm_save_chat_message] Error al insertar post crm_chat: ' . $post_id->get_error_message() );
         return $post_id;
     }
 
-    error_log( "[crm_save_chat_message] Post crm_chat creado con ID: {$post_id}" );
-
-    // 4. Guardar metadatos
+    // Guardar metadatos
     update_post_meta( $post_id, '_crm_contact_user_id', $message_data['contact_user_id'] );
     update_post_meta( $post_id, '_crm_instance_name', $message_data['instance_name'] );
-    update_post_meta( $post_id, '_crm_sender_jid', $message_data['sender_jid'] );
-    update_post_meta( $post_id, '_crm_recipient_jid', $message_data['recipient_jid'] );
     update_post_meta( $post_id, '_crm_is_outgoing', $message_data['is_outgoing'] );
     update_post_meta( $post_id, '_crm_message_id_wa', $message_data['message_id_wa'] );
     update_post_meta( $post_id, '_crm_timestamp_wa', $message_data['timestamp_wa'] );
     update_post_meta( $post_id, '_crm_message_type', $message_data['message_type'] );
-    update_post_meta( $post_id, '_crm_is_group_message', $message_data['is_group_message'] );
-
-    if ( $message_data['is_group_message'] && ! empty( $message_data['participant_jid'] ) ) {
-        update_post_meta( $post_id, '_crm_participant_jid', $message_data['participant_jid'] );
-    }
     if ( $attachment_id ) {
         update_post_meta( $post_id, '_crm_media_attachment_id', $attachment_id );
         // Asociar el adjunto al post de chat (además de al usuario)
@@ -576,6 +510,28 @@ function crm_save_chat_message( $message_data ) {
         update_post_meta( $post_id, '_crm_media_caption', $message_data['media_caption'] );
     }
 
+    // Verificar si el mensaje es de un grupo y si hay datos del participante
+    $contact_wp_user_id = $message_data['contact_user_id'] ?? 0;
+    // El metadato _crm_is_group se establece en crm_process_single_jid cuando se crea el usuario para un grupo
+    $is_group_chat = get_user_meta($contact_wp_user_id, '_crm_is_group', true);
+
+    // Solo guardar información del participante si es un chat de grupo,
+    // el mensaje NO es saliente (es decir, es recibido), y tenemos un JID de participante.
+    if ($is_group_chat && !empty($message_data['participant'])) {
+        $participant_jid = sanitize_text_field($message_data['participant']);
+        // pushname ya viene sanitizado desde crm_evolution_webhook_handler_callback
+        $participant_pushname = $message_data['pushname'];
+
+        error_log("[crm_save_chat_message] Mensaje de GRUPO (User ID: {$contact_wp_user_id}). Participante JID: {$participant_jid}, PushName: {$participant_pushname}");
+
+        update_post_meta($post_id, '_crm_participant', $participant_jid);
+        update_post_meta($post_id, '_crm_pushName', $participant_pushname);
+
+        if (strpos($message_data['participant'], '@s.whatsapp.net')){
+            // para guardar el usuario ?
+            error_log("[crm_save_chat_message] es un contacto valido (User ID: {$contact_wp_user_id}). Participante JID: {$participant_jid}, PushName: {$participant_pushname}");
+        }
+    }
     error_log( "[crm_save_chat_message] Metadatos guardados para el post crm_chat ID: {$post_id}" );
 
     return $post_id;
@@ -583,12 +539,6 @@ function crm_save_chat_message( $message_data ) {
 
 /**
  * Procesa datos Base64, los guarda en la Media Library y devuelve el ID del adjunto.
- *
- * @param string $base64_data Datos del archivo en Base64.
- * @param string $mime_type   MIME type del archivo.
- * @param string|null $caption Leyenda para el archivo (usada como título/descripción).
- * @param int $post_author_id ID del usuario al que atribuir la subida.
- * @return int|WP_Error ID del adjunto creado o WP_Error en caso de fallo.
  */
 function crm_process_base64_media( $base64_data, $mime_type, $caption = null, $post_author_id = 0 ) {
     error_log( "[crm_process_base64_media] Iniciando procesamiento para MIME: {$mime_type}" );
@@ -647,10 +597,6 @@ function crm_process_base64_media( $base64_data, $mime_type, $caption = null, $p
 
 /**
  * Convierte un MIME type a una extensión de archivo común.
- * (Función auxiliar simple, se puede expandir)
- *
- * @param string $mime_type El MIME type.
- * @return string|false La extensión o false si no se conoce.
  */
 function mime_content_type_to_extension($mime_type) {
     $mime_map = [
@@ -672,6 +618,5 @@ function mime_content_type_to_extension($mime_type) {
     ];
     return $mime_map[$mime_type] ?? false;
 }
-
 
 ?>

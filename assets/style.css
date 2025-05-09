@@ -1,100 +1,3 @@
-
-
-/* --- Contenedor del contenido del modal Thickbox --- */
-#TB_ajaxContent {
-    overflow-y: auto !important; /* Scroll vertical si es necesario */
-    padding: 25px 30px !important; /* Espaciado interno */
-    box-sizing: border-box;
-}
-
-
-
-/* ==========================================================================
-   ESTILOS para instancias
-========================================================================== */
-
-/* --- Formulario específico --- */
-#add-instance-form {
-    display: block; /* Asegura que sea un bloque */
-    width: 100%;
-    box-sizing: border-box;
-}
-
-/* --- Contenedores de campos (párrafos) --- */
-#add-instance-form p {
-    display: block; /* Cada 'p' es una fila */
-    margin: 0 0 15px 0; /* Espacio debajo de cada campo/grupo */
-    padding: 0;
-}
-
-/* --- Etiquetas --- */
-#add-instance-form label {
-    display: block; /* Ocupa su propia línea */
-    margin-bottom: 5px; /* Espacio entre etiqueta y campo */
-    font-weight: 600; /* Estilo WP */
-    color: #2c3338; /* Color WP */
-}
-
-/* --- Campos de Texto y URL --- */
-#add-instance-form input[type="text"],
-#add-instance-form input[type="url"] {
-    display: block; /* Ocupa su propia línea */
-    width: 100%; /* Ancho completo */
-    padding: 6px 8px; /* Padding WP */
-    border: 1px solid #8c8f94; /* Borde WP */
-    box-shadow: inset 0 1px 2px rgba(0,0,0,.07); /* Sombra WP */
-    box-sizing: border-box; /* Padding/border dentro del ancho */
-}
-
-/* --- Descripciones --- */
-#add-instance-form .description {
-    display: block; /* Ocupa su propia línea */
-    margin-top: 4px; /* Espacio sobre la descripción */
-    margin-left: 0; /* Sin indentación */
-    font-size: 0.85em; /* Tamaño WP */
-    color: #646970; /* Color ayuda WP */
-    font-style: italic;
-}
-
-/* --- Estilo para campo Readonly --- */
-#add-instance-form input[readonly] {
-    background-color: #f0f0f1; /* Fondo gris WP */
-    cursor: not-allowed; /* Cursor */
-    border-color: #dcdcde; /* Borde más claro */
-}
-
-/* --- Grupo de Checkboxes (Fieldset) --- */
-#add-instance-form fieldset {
-    display: block; /* Ocupa su propia línea */
-    border: 1px solid #ddd; /* Borde suave */
-    padding: 15px;
-    margin: 0 0 20px 0; /* Margen inferior */
-    width: 100%;
-    box-sizing: border-box;
-}
-
-#add-instance-form fieldset legend {
-    font-weight: 600; /* Estilo WP */
-    padding: 0 5px;
-    color: #2c3338;
-}
-
-/* --- Botón de Envío --- */
-#add-instance-form .submit {
-    display: block; /* Ocupa su propia línea */
-    margin-top: 20px; /* Espacio arriba */
-    padding: 0;
-    text-align: left; /* Alinear a la izquierda */
-}
-
-/* ==========================================================================
-   ESTILOS para CPT Campañas (Admin)
-   ========================================================================== */
-/* Ajustar espacio debajo del wp_editor en el metabox de campañas */
-#crm_campaign_settings .wp-editor-wrap + p.description {
-    margin-top: 5px; /* Reduce el espacio superior (ajusta el valor según necesites) */
-}
-
 /* ==========================================================================
    ESTILOS para Historial de Chats
 ========================================================================== */
@@ -140,6 +43,33 @@
     border-radius: 20px; /* Bordes redondeados */
     box-sizing: border-box;
     font-size: 0.9em;
+}
+/* --- Estilos Filtros de Chat --- */
+.crm-chat-history-page .chat-list-filters {
+    display: flex;
+    gap: 8px; /* Espacio entre botones */
+    margin-top: 10px; /* Espacio arriba de los filtros */
+    padding-bottom: 5px; /* Un poco de espacio antes de la lista */
+}
+
+.crm-chat-history-page .filter-button {
+    flex-grow: 1; /* Para que ocupen el espacio disponible equitativamente */
+    padding: 6px 10px;
+    font-size: 0.85em;
+    font-weight: 500;
+    text-align: center;
+    border: 1px solid #ccd0d4; /* Borde similar a otros elementos de WP */
+    background-color: #f6f7f7; /* Fondo claro */
+    color: #0073aa; /* Azul WordPress para el texto */
+    border-radius: 3px;
+    cursor: pointer;
+    transition: background-color 0.15s ease, border-color 0.15s ease;
+}
+.crm-chat-history-page .filter-button.active,
+.crm-chat-history-page .filter-button:hover {
+    background-color: #0073aa; /* Azul WordPress para activo/hover */
+    color: #fff;
+    border-color: #006799; /* Borde más oscuro para activo/hover */
 }
 
 .crm-chat-history-page .chat-list-items {
@@ -568,6 +498,16 @@
     overflow-y: auto; /* Scroll si el contenido es largo */
     padding: 15px;
     line-height: 1.6; /* Mejorar legibilidad */
+}
+
+/* Estilo para los títulos de sección dentro de los detalles del contacto */
+.crm-chat-history-page .contact-details-content .contact-details-section-title {
+    margin-top: 20px;
+    margin-bottom: 10px;
+    font-size: 1.1em;
+    color: #2271b1; /* Azul de WordPress */
+    border-bottom: 1px solid #eee;
+    padding-bottom: 5px;
 }
 
 /* Placeholder para futuros campos de formulario */

@@ -4,12 +4,6 @@
 
     
     // --- Logging Básico (JS) ---
-    /**
-     * Función simple de logging en la consola del navegador.
-     * @param {any} message Mensaje o dato a registrar.
-     * @param {string} level Nivel de log (INFO, DEBUG, WARN, ERROR).
-     * @param {any} [extraData=null] Datos adicionales para registrar (opcional).
-     */
     function crm_js_log(message, level = 'INFO', extraData = null) { // Añadir extraData
         // Añadir verificación de tipo para level por seguridad
         if (typeof level !== 'string') {
@@ -46,223 +40,7 @@
             console.error("Detalle del error (desde mensaje):", message);
         }
     }
-
-
-    // --- Variables Globales del Módulo ---
-    let instancesTable = null; // Referencia a la DataTable de Instancias
-
-    /**
-    * Inicializa la DataTable para la tabla de Instancias API.
-    */
-    function initInstancesTable() {
-        // crm_js_log('Inicializando DataTable para Instancias.');
-        if ($('#instances-table').length === 0) {
-            crm_js_log('Tabla #instances-table no encontrada en el DOM.', 'WARN');
-            return;
-        }
-        if (instancesTable) {
-            crm_js_log('DataTable de Instancias ya inicializada. Refrescando datos...');
-            instancesTable.ajax.reload();
-            return;
-        }
-
-        instancesTable = $('#instances-table').DataTable({
-            processing: true, // Indicador de carga
-            serverSide: false, // Cambiar a true si usas server-side processing con AJAX
-            ajax: {
-                url: crm_evolution_sender_params.ajax_url, // URL de admin-ajax.php
-                type: 'POST',
-                data: {
-                    action: 'crm_get_instances', // Acción AJAX que definimos en PHP
-                    _ajax_nonce: crm_evolution_sender_params.nonce // Nonce de seguridad
-                },
-                dataSrc: function(json) {
-                    // Manejar la respuesta AJAX
-                    console.log(json) // Mantener para depuración si es necesario
-                    if (!json || !json.success || !Array.isArray(json.data)) {
-                        crm_js_log('Error o formato inesperado en la respuesta AJAX para get_instances.', 'ERROR', json);
-                        showNotification('Error al cargar instancias.', 'error');
-                        return []; // Devuelve array vacío en caso de error
-                    }
-                    crm_js_log('Datos de instancias recibidos:', json.data);
-                    return json.data; // Los datos para DataTables están en json.data
-                },
-                error: function(xhr, status, error) {
-                    crm_js_log('Error AJAX al obtener instancias.', 'ERROR', { status: status, error: error, response: xhr.responseText });
-                    showNotification('Error de conexión al cargar instancias.', 'error');
-                }
-            },
-            columns: [
-                // *** INICIO: Nueva Columna Avatar ***
-                {
-                    data: 'profile_pic_url', // Coincide con la clave enviada desde PHP (corregida a profilePictureUrl en PHP)
-                    title: 'Avatar',         // Título (aunque se toma del TH)
-                    orderable: false,        // No ordenar por imagen
-                    searchable: false,       // No buscar por imagen
-                    render: function(data, type, row) {
-                        // 'type' es 'display' cuando se renderiza para mostrar en la tabla
-                        if (type === 'display') {
-                            if (data) { // Si hay una URL de imagen
-                                // Añadir clase CSS para poder darle estilo (ej: redondear)
-                                return '<img src="' + escapeHtml(data) + '" alt="Avatar de ' + escapeHtml(row.instance_name) + '" class="instance-avatar" width="40" height="40" loading="lazy">'; // lazy loading es buena idea
-                            } else { // Si no hay URL (data es null o vacío)
-                                // Mostrar un placeholder (icono de WordPress)
-                                return '<span class="avatar-placeholder dashicons dashicons-admin-users"></span>';
-                            }
-                        }
-                        // Para otros tipos ('filter', 'sort', etc.), devolver el dato crudo o vacío
-                        return data;
-                    },
-                    className: 'column-avatar' // Clase CSS para la celda (<td>)
-                },
-                // *** FIN: Nueva Columna Avatar ***
-
-                // Columnas existentes
-                { data: 'instance_name' }, // Nombre de la instancia
-                { data: 'status', render: function(data, type, row) {
-                    // Renderizar el estado con colores/clases
-                    let statusClass = 'badge-secondary'; // Clase por defecto
-                    let statusText = data ? data.charAt(0).toUpperCase() + data.slice(1) : 'Desconocido';
-
-                    // Mapeo mejorado de estados comunes de Evolution API
-                    switch (data ? data.toLowerCase() : 'unknown') {
-                        case 'open':
-                        case 'connected': // Tratar 'connected' como 'open'
-                        case 'connection': // Tratar 'connection' como 'open'
-                            statusClass = 'badge-success';
-                            statusText = 'Conectado';
-                            break;
-                        case 'qrcode':
-                            statusClass = 'badge-warning';
-                            statusText = 'Esperando QR';
-                            break;
-                        case 'connecting':
-                            statusClass = 'badge-info';
-                            statusText = 'Conectando...';
-                            break;
-                        case 'close':
-                        case 'disconnected': // Tratar 'disconnected' como 'close'
-                            statusClass = 'badge-danger';
-                            statusText = 'Desconectado';
-                            break;
-                        default:
-                        statusText = data ? escapeHtml(data) : 'Desconocido'; // Mostrar estado desconocido si no coincide
-                    }
-                    // Usar las clases de badge que definimos en style.css
-                    return `<span class="badge ${statusClass}">${escapeHtml(statusText)}</span>`;
-                }},
-                { data: 'owner', render: function(data, type, row){ // Extraer solo el número
-                    return data ? escapeHtml(data.split('@')[0]) : 'N/D';
-                }},
-                { data: null, orderable: false, searchable: false, render: function(data, type, row) {
-                    // Botones de acción (Editar, Eliminar, Conectar/Desconectar, etc.)
-                    let instanceNameEsc = escapeHtml(row.instance_name);
-                    let status = row.status ? row.status.toLowerCase() : 'unknown';
-                    let actions = '';
-
-                    // Botón QR: Solo si el estado es 'qrcode' o 'connecting' (a veces 'connecting' pide QR)
-                    if (status === 'qrcode' || status === 'connecting') {
-                        actions += `<button class="button button-small btn-show-qr" data-instance="${instanceNameEsc}" title="Mostrar QR Code"><span class="dashicons dashicons-camera"></span></button> `;
-                    }
-                    // Botón Conectar: Solo si el estado es 'close' o 'disconnected'
-                    if (status === 'close' || status === 'disconnected') {
-                        actions += `<button class="button button-small btn-connect-instance" data-instance="${instanceNameEsc}" title="Conectar Instancia"><span class="dashicons dashicons-admin-plugins"></span></button> `;
-                    }
-                    // Botón Desconectar: Solo si está conectado ('open', 'connected', 'connection')
-                    if (status === 'open' || status === 'connected' || status === 'connection') {
-                        actions += `<button class="button button-small btn-disconnect-instance" data-instance="${instanceNameEsc}" title="Desconectar Instancia"><span class="dashicons dashicons-exit"></span></button> `;
-                    }
-                    // Botón Eliminar: Siempre visible (o según tu lógica)
-                    actions += `<button class="button button-small button-danger btn-delete-instance" data-instance="${instanceNameEsc}" title="Eliminar Instancia"><span class="dashicons dashicons-trash"></span></button>`;
-
-                    return actions;
-                }, className: 'column-actions' // Añadir clase para posible estilo
-            }
-            ],
-            language: dataTablesLang, // Usar traducción al español
-            order: [[ 1, 'asc' ]] // Ordenar por nombre de instancia (ahora índice 1) por defecto
-        });
-    }
-
-    function initCampaignsTable() {
-        crm_js_log('Inicializando DataTable para Campañas.');
-        if ($('#campaigns-table').length === 0) {
-            crm_js_log('Tabla #campaigns-table no encontrada en el DOM.', 'WARN');
-            return;
-        }
-        if (campaignsTable) {
-            crm_js_log('DataTable de Campañas ya inicializada. Refrescando datos...');
-            campaignsTable.ajax.reload();
-            return;
-        }
-
-        campaignsTable = $('#campaigns-table').DataTable({
-            processing: true,
-            serverSide: false, // Cambiar si es necesario
-            ajax: {
-                url: crm_evolution_sender_params.ajax_url,
-                type: 'POST',
-                data: {
-                    action: 'crm_get_campaigns',
-                    _ajax_nonce: crm_evolution_sender_params.nonce
-                },
-                dataSrc: function(json) {
-                    console.log(json) 
-                    if (!json || !json.success || !Array.isArray(json.data)) {
-                        crm_js_log('Error o formato inesperado en la respuesta AJAX para get_campaigns.', 'ERROR', json);
-                        showNotification('Error al cargar campañas.', 'error');
-                        return [];
-                    }
-                    crm_js_log('Datos de campañas recibidos:', json.data);
-                    return json.data;
-                },
-                error: function(xhr, status, error) {
-                    crm_js_log('Error AJAX al obtener campañas.', 'ERROR', { status: status, error: error, response: xhr.responseText });
-                    showNotification('Error de conexión al cargar campañas.', 'error');
-                }
-            },
-            columns: [
-                { data: 'name' }, // <--- CORREGIDO (coincide con get_the_title() en PHP)
-                { data: 'instance_name' }, // OK (asumiendo meta key _crm_instance_name)
-                { data: 'message', render: function(data, type, row){ return data ? escapeHtml(data).substring(0, 50) + '...' : ''; } }, // OK (asumiendo meta key _crm_message_content) - Añadido chequeo por si está vacío
-                { data: 'media_url', render: function(data, type, row){ return data ? `<a href="${escapeHtml(data)}" target="_blank">Ver Media</a>` : 'No'; } }, // OK (asumiendo meta key _crm_media_url)
-                { data: 'target_tag', defaultContent: '<i>N/A</i>' }, // OK (asumiendo meta key _crm_target_tag) - Cambiado defaultContent
-                // { data: 'recipients_count', defaultContent: '0' }, // <-- Dato no provisto por PHP actualmente
-                // { data: 'scheduled_date', defaultContent: 'N/A' }, // <-- Dato no provisto por PHP actualmente
-                { data: 'interval_minutes', defaultContent: '<i>N/A</i>' }, // OK (asumiendo meta key _crm_interval_minutes) - Cambiado defaultContent
-                { data: 'status', render: function(data, type, row) { // OK (usa get_post_status() en PHP)
-                    let statusClass = data ? data.toLowerCase() : 'unknown';
-                    let statusText = data || 'Desconocido';
-                    // Mapeo simple (ajustar según estados reales de WP o meta)
-                    if (statusText === 'publish') statusText = 'Publicada'; // Mapeo de ejemplo
-                    if (statusText === 'draft') statusText = 'Borrador';
-                    if (statusText === 'pending') statusText = 'Pendiente';
-                    // Añadir más mapeos si usas estados personalizados o meta fields
-                    // Ejemplo si usaras un meta field _crm_campaign_status:
-                    // if (row._crm_campaign_status === 'paused') statusText = 'Pausada';
-
-                    return `<span class="campaign-status ${statusClass}">${escapeHtml(statusText)}</span>`;
-                }},
-                { data: null, orderable: false, searchable: false, render: function(data, type, row) { // OK (usa row.id que viene de get_the_ID())
-                    // Botones de acción (Editar, Eliminar, Pausar/Reanudar, Ver Detalles)
-                    let campaignId = escapeHtml(row.id); // Asumiendo que hay un ID
-                    let actions = `<button class="button button-small btn-edit-campaign" data-id="${campaignId}" title="Editar"><span class="dashicons dashicons-edit"></span></button> `;
-                    actions += `<button class="button button-small btn-delete-campaign" data-id="${campaignId}" title="Eliminar"><span class="dashicons dashicons-trash"></span></button> `;
-                    // Añadir más acciones según estado (ej: pausar si está enviando/pendiente)
-                    // Necesitarías ajustar la lógica de estado aquí también
-                    // if (row.status === 'publish' /* o tu estado 'activo' */) {
-                    //      actions += `<button class="button button-small btn-pause-campaign" data-id="${campaignId}" title="Pausar"><span class="dashicons dashicons-controls-pause"></span></button> `;
-                    // } else if (row.status === 'draft' /* o tu estado 'pausado' */) {
-                    //      actions += `<button class="button button-small btn-resume-campaign" data-id="${campaignId}" title="Reanudar/Publicar"><span class="dashicons dashicons-controls-play"></span></button> `;
-                    // }
-                    // actions += `<button class="button button-small btn-view-campaign" data-id="${campaignId}" title="Ver Detalles"><span class="dashicons dashicons-visibility"></span></button>`;
-                    return actions;
-                }}
-            ],
-            language: dataTablesLang
-        });
-    }
-   
+ 
     /**
      * Muestra una notificación usando SweetAlert2.
      * @param {string} title Título de la notificación.
@@ -287,7 +65,7 @@
         crm_js_log(`Notificación mostrada: [${icon}] ${title} ${text}`);
     }
 
-     /**
+    /**
      * Escapa caracteres HTML para prevenir XSS.
      * @param {string} str La cadena a escapar.
      * @returns {string} La cadena escapada.
@@ -304,33 +82,6 @@
             }[match];
         });
     }
-
-    // Traducción básica de DataTables al español
-    const dataTablesLang = {
-        "decimal": "",
-        "emptyTable": "No hay datos disponibles en la tabla",
-        "info": "Mostrando _START_ a _END_ de _TOTAL_ entradas",
-        "infoEmpty": "Mostrando 0 a 0 de 0 entradas",
-        "infoFiltered": "(filtrado de _MAX_ entradas totales)",
-        "infoPostFix": "",
-        "thousands": ",",
-        "lengthMenu": "Mostrar _MENU_ entradas",
-        "loadingRecords": "Cargando...",
-        "processing": "Procesando...",
-        "search": "Buscar:",
-        "zeroRecords": "No se encontraron registros coincidentes",
-        "paginate": {
-            "first": "Primero",
-            "last": "Último",
-            "next": "Siguiente",
-            "previous": "Anterior"
-        },
-        "aria": {
-            "sortAscending": ": activar para ordenar la columna ascendente",
-            "sortDescending": ": activar para ordenar la columna descendente"
-        }
-    };
-
 
     /**
      * Realiza una llamada AJAX genérica al backend de WordPress.
@@ -388,296 +139,9 @@
         });
     }
 
-    /** Elimina una instancia */
-    function deleteInstance(instanceName) {
-        crm_js_log(`Solicitando confirmación para eliminar instancia: ${instanceName}`);
-        Swal.fire({
-            title: '¿Estás seguro?',
-            text: `Estás a punto de eliminar la instancia "${escapeHtml(instanceName)}". ¡Esta acción no se puede deshacer!`,
-            icon: 'warning',
-            showCancelButton: true,
-            confirmButtonColor: '#d33',
-            cancelButtonColor: '#3085d6',
-            confirmButtonText: 'Sí, eliminarla',
-            cancelButtonText: 'Cancelar'
-        }).then((result) => {
-            if (result.isConfirmed) {
-                crm_js_log(`Confirmada eliminación de instancia: ${instanceName}`);
-                performAjaxRequest('crm_delete_instance', { instance_name: instanceName },
-                    (response) => {
-                        showNotification('Instancia eliminada', 'success', response.message || `La instancia ${instanceName} ha sido eliminada.`);
-                        if (instancesTable) instancesTable.ajax.reload();
-                    }
-                    // onError es manejado por performAjaxRequest
-                );
-            } else {
-                 crm_js_log(`Eliminación de instancia ${instanceName} cancelada.`);
-            }
-        });
-    }
-
-     /** Muestra el código QR para una instancia */
-    function showQrCode(instanceName) {
-        crm_js_log(`Solicitando QR Code para instancia: ${instanceName}`);
-         // Usar performAjaxRequest para obtener el QR (base64) o la URL del QR
-         performAjaxRequest('crm_get_instance_qr', { instance_name: instanceName },
-            (response) => {
-                if (response.qrCode) {
-                     crm_js_log(`QR Code recibido para ${instanceName}`);
-                     Swal.fire({
-                        title: `Conectar Instancia: ${escapeHtml(instanceName)}`,
-                        html: `
-                            <p>Escanea este código QR con la aplicación WhatsApp en tu teléfono:</p>
-                            <div id="qrcode-container" style="margin: 20px 0;">
-                                <img src="${response.qrCode}" alt="Código QR" style="display: block; margin: 0 auto; max-width: 250px; height: auto;">
-                            </div>
-                            <p><small>El código QR se actualiza periódicamente. Si expira, cierra esta ventana y vuelve a intentarlo.</small></p>
-                            <p><strong>Estado actual:</strong> <span id="qr-status">Esperando escaneo...</span></p>
-                        `,
-                        showConfirmButton: false, // No necesitamos botón de confirmar
-                        showCancelButton: true,
-                        cancelButtonText: 'Cerrar',
-                        // Podríamos añadir lógica para refrescar el QR o comprobar estado aquí si la API lo permite
-                    });
-                    // Aquí podrías iniciar un polling o WebSocket para verificar el estado de conexión si la API lo soporta
-                } else {
-                    crm_js_log(`No se recibió QR Code para ${instanceName}. Respuesta:`, 'WARN', response);
-                    showNotification('Error al obtener QR', 'error', response.message || 'No se pudo obtener el código QR.');
-                }
-            }
-            // onError es manejado por performAjaxRequest
-         );
-    }
-
-     /** Conecta/Reconecta una instancia */
-    function connectInstance(instanceName) {
-        crm_js_log(`Intentando conectar instancia: ${instanceName}`);
-        performAjaxRequest('crm_connect_instance', { instance_name: instanceName },
-            (response) => {
-                showNotification('Conexión iniciada', 'info', response.message || `Intentando conectar la instancia ${instanceName}.`);
-                if (instancesTable) instancesTable.ajax.reload(null, false); // Recargar sin resetear paginación
-                 // Si la respuesta indica que ahora necesita QR, mostrarlo
-                 if (response.status === 'qrcode') {
-                    showQrCode(instanceName);
-                 }
-            }
-        );
-    }
-
-    /** Desconecta una instancia */
-    function disconnectInstance(instanceName) {
-        crm_js_log(`Intentando desconectar instancia: ${instanceName}`);
-         Swal.fire({
-            title: '¿Desconectar Instancia?',
-            text: `¿Seguro que quieres desconectar la instancia "${escapeHtml(instanceName)}"?`,
-            icon: 'question',
-            showCancelButton: true,
-            confirmButtonText: 'Sí, desconectar',
-            cancelButtonText: 'Cancelar'
-        }).then((result) => {
-            if (result.isConfirmed) {
-                performAjaxRequest('crm_disconnect_instance', { instance_name: instanceName },
-                    (response) => {
-                        showNotification('Instancia desconectada', 'success', response.message || `La instancia ${instanceName} ha sido desconectada.`);
-                        if (instancesTable) instancesTable.ajax.reload(null, false);
-                    }
-                );
-            }
-        });
-    }
-
-    // --- INICIO: Manejador para el formulario de Añadir Instancia (Thickbox) ---
-    $(document).on('submit', '#add-instance-form', function(event) {
-        event.preventDefault(); // Prevenir envío normal del formulario
-
-        crm_js_log('Formulario #add-instance-form enviado.');
-
-        const $form = $(this);
-        const $submitButton = $('#submit-add-instance', $form); // Seleccionar el botón de submit
-        const originalButtonText = $submitButton.val(); // Guardar texto original del botón
-
-        const instanceName = $('#instance_name', $form).val().trim();
-        const nonce = $('#crm_create_instance_nonce', $form).val();
-        const webhookUrl = $('#webhook_url', $form).val();
-
-        // Validación básica (como antes)
-        if (!instanceName) {
-            showNotification('Error', 'error', 'El nombre de la instancia es obligatorio.');
-            return;
-        }
-        const pattern = /^[a-zA-Z0-9_-]+$/;
-        if (!pattern.test(instanceName)) {
-            showNotification('Nombre Inválido', 'error', 'El nombre solo puede contener letras, números, guiones bajos (_) y guiones medios (-).');
-            return;
-        }
-
-        // --- Deshabilitar botón y cambiar texto ANTES de AJAX ---
-        $submitButton.prop('disabled', true).val(crm_evolution_sender_params.i18n.creatingText);
-
-        // Preparar datos para AJAX (como antes)
-        const data = {
-            action: 'crm_create_instance',
-            _ajax_nonce: nonce,
-            instance_name: instanceName,
-            webhook_url: webhookUrl,
-        };
-
-        crm_js_log('Enviando datos AJAX para crear instancia:', 'DEBUG', data);
-
-        // Llamada AJAX
-        $.post(crm_evolution_sender_params.ajax_url, data)
-            .done(function(response) {
-                crm_js_log('Respuesta AJAX (crear instancia) recibida:', 'DEBUG', response);
-                if (response.success) {
-                    console.log(response)
-                    showNotification('¡Éxito!', 'success', response.data.message || 'Instancia creada correctamente.');
-                    tb_remove();
-                    if (instancesTable) {
-                        instancesTable.ajax.reload();
-                    } else {
-                        crm_js_log('Variable instancesTable no definida, no se puede recargar.', 'WARN');
-                    }
-                    showQrCode(instanceName)
-                } else {
-                    Swal.fire({
-                        icon: 'error',
-                        title: 'Error al Crear',
-                        text: response.data.message || 'Ocurrió un error desconocido.'
-                    });
-                    crm_js_log('Error devuelto por el servidor al crear instancia:', 'ERROR', response.data);
-                }
-            })
-            .fail(function(jqXHR, textStatus, errorThrown) {
-                crm_js_log('Error en la llamada AJAX (crear instancia):', 'ERROR', { status: textStatus, error: errorThrown });
-                Swal.fire({
-                    icon: 'error',
-                    title: 'Error de Comunicación',
-                    text: 'No se pudo conectar con el servidor. Detalles: ' + textStatus
-                });
-            })
-            .always(function() {
-            $submitButton.prop('disabled', false).val(originalButtonText);
-            });
-    });
-
- 
-    // --- Event Handlers ---
-    /**
-     * Inicializa los manejadores de eventos generales.
-     */
-    function initEventHandlers() {
-        crm_js_log('Inicializando manejadores de eventos.');    
-
-        $('#instances-table tbody').on('click', '.btn-delete-instance', function() {
-            const instanceName = $(this).data('instance');
-            deleteInstance(instanceName);
-        });
-
-         $('#instances-table tbody').on('click', '.btn-show-qr', function() {
-            const instanceName = $(this).data('instance');
-            showQrCode(instanceName);
-        });
-
-         $('#instances-table tbody').on('click', '.btn-connect-instance', function() {
-            const instanceName = $(this).data('instance');
-            connectInstance(instanceName);
-        });
-
-         $('#instances-table tbody').on('click', '.btn-disconnect-instance', function() {
-            const instanceName = $(this).data('instance');
-            disconnectInstance(instanceName);
-        });
-
-    
-        // ** Pestaña Usuarios **
-        $(document).on('submit', '#add-user-form', function(e) {
-            e.preventDefault();
-            crm_js_log('Formulario Añadir Usuario enviado.');
-
-            if (!phoneInputInstance) {
-                crm_js_log('Error: instancia de intl-tel-input no encontrada.', 'ERROR');
-                showNotification('Error', 'error', 'El campo de teléfono no se inicializó correctamente. Intenta recargar.');
-                return; // Detener el envío
-            }
-    
-            if (!phoneInputInstance.isValidNumber()) {
-                crm_js_log('Número de teléfono inválido según intl-tel-input.', 'WARN');
-                showNotification('Número Inválido', 'warning', 'Por favor, introduce un número de teléfono válido para el país seleccionado.');
-                return; // Detener el envío
-            }
-    
-            const fullPhoneNumber = phoneInputInstance.getNumber(); // Obtiene formato E.164 (+51...)
-            crm_js_log(`Número de teléfono internacional obtenido: ${fullPhoneNumber}`, 'DEBUG');
-            
-
-            const formData = $(this).serializeArray(); // Obtener datos del formulario
-            let dataToSend = {
-                action: 'crm_add_wp_user', // Acción AJAX para añadir usuario
-                user_phone_full: fullPhoneNumber
-                // _ajax_nonce: crm_evolution_sender_params.nonce // performAjaxRequest lo añade
-            };
-
-            // Convertir formData a objeto simple y añadir a dataToSend
-            $.each(formData, function(index, field) {
-                if (field.name !== 'user_phone_input') {
-                    dataToSend[field.name] = field.value;
-                }
-                // dataToSend[field.name] = field.value;
-            });
-
-             crm_js_log('Datos a enviar para añadir usuario:', 'DEBUG', dataToSend);
-
-            // Mostrar indicador de carga
-            const submitButton = $(this).find('input[type="submit"]');
-            submitButton.prop('disabled', true).val('Añadiendo...'); // Cambiar texto y deshabilitar
-
-            performAjaxRequest(
-                'crm_add_wp_user', // Acción AJAX
-                dataToSend,        // Datos (incluye user_phone_full)
-                function(response) { // onSuccess
-                    // showNotification ya no es necesaria aquí si performAjaxRequest la maneja
-                    // showNotification('Éxito', 'success', response.message || 'Usuario añadido correctamente.');
-                    tb_remove(); // Cerrar el modal Thickbox
-                    if (usersTable) { // Recargar la tabla de usuarios
-                        usersTable.ajax.reload();
-                    }
-                },
-                function(errorResponse) { // onError
-                    // performAjaxRequest ya muestra un error genérico
-                    crm_js_log('Error específico al añadir usuario.', 'ERROR', errorResponse);
-                }
-                // Elimina el callback onComplete si lo tenías como argumento separado
-            ).always(function() { // <--- Usar always para restaurar el botón
-                 // Reactivar el botón de envío y restaurar texto
-                 submitButton.prop('disabled', false).val(originalButtonText);
-                 crm_js_log('Botón de añadir usuario restaurado.');
-                 // Swal.close() ya debería haber sido llamado por success/error de performAjaxRequest
-            });
-        });
-
-
-        // ** Pestaña Marketing **
-         $('#campaigns-table tbody').on('click', '.btn-edit-campaign', function() {
-             const campaignId = $(this).data('id');
-             crm_js_log(`Clic en editar campaña: ${campaignId} (funcionalidad pendiente de datos completos)`);
-             showNotification('Función Pendiente', 'info', 'La edición de campañas requiere cargar datos adicionales.');
-             // Idealmente:
-             // performAjaxRequest('crm_get_campaign_details', { id: campaignId }, (data) => { openCampaignModal(data); });
-         });
-
-         $('#campaigns-table tbody').on('click', '.btn-delete-campaign', function() {
-             const campaignId = $(this).data('id');
-             deleteCampaign(campaignId);
-         });
-         // TODO: Añadir handlers para Pausar, Reanudar, Ver Detalles de campaña
-
-
-        crm_js_log('Manejadores de eventos inicializados.');
-    }
-
     /**
      * Cambia la vista de detalles del contacto a modo edición.
-     */
+    */
     function switchToEditMode(userId) {
         const $ = jQuery;
         const $detailsContainer = $('#contact-details-content');
@@ -687,12 +151,13 @@
         const currentData = {
             name: $detailsContainer.find('label:contains("Nombre:")').next('span').text(),
             firstName: $detailsContainer.find('label:contains("Nombres:")').next('span').text(), // Nuevo
-            lastName: $detailsContainer.find('label:contains("Apellidos:")').next('span').text(), // Nuevo
+            lastName: $detailsContainer.find('label:contains("Apellidos:")').next('span').text(),   // Nuevo
             phone: $detailsContainer.find('label:contains("Teléfono:")').next('span').text(),
             email: $detailsContainer.find('label:contains("Email:")').next('span').text(),
+            roleKey: $detailsContainer.find('label:contains("Rol:")').next('span').data('role-key'), // Leer la clave del rol
             tagKey: $detailsContainer.find('label:contains("Etiqueta:")').next('span.tag-badge').data('tag-key'),
             notes: $detailsContainer.find('.contact-notes-content').html().replace(/<br\s*\/?>/gi, '\n').replace(/<i>Sin notas<\/i>/i, '').trim() // Convertir <br> a \n y quitar placeholder
-            // Rol y Fecha de Registro no son editables aquí
+            // Fecha de Registro no es editable aquí
             // Historial de WooCommerce no es editable
         };
         crm_js_log('Datos actuales para edición:', 'DEBUG', currentData);
@@ -704,6 +169,12 @@
         $detailsContainer.find('label:contains("Nombres:")').next('span').replaceWith(`<input type="text" id="edit-contact-first-name" class="regular-text" value="${escapeHtml(currentData.firstName)}">`);
         $detailsContainer.find('label:contains("Apellidos:")').next('span').replaceWith(`<input type="text" id="edit-contact-last-name" class="regular-text" value="${escapeHtml(currentData.lastName)}">`);
         $detailsContainer.find('label:contains("Email:")').next('span').replaceWith(`<input type="email" id="edit-contact-email" class="regular-text" value="${escapeHtml(currentData.email)}">`);
+
+        // Reemplazar span de Rol con un select
+        const $roleSpan = $detailsContainer.find('label:contains("Rol:")').next('span');
+        const $roleSelect = $('<select id="edit-contact-role" class="regular-text"></select>');
+        $roleSpan.replaceWith($roleSelect);
+        loadWordPressRolesIntoSelect($roleSelect, currentData.roleKey); // Nueva función auxiliar
 
         // Reemplazar span de etiqueta con un select (requiere cargar etiquetas)
         const $tagSpan = $detailsContainer.find('label:contains("Etiqueta:")').next('span.tag-badge');
@@ -750,6 +221,36 @@
     }
 
     /**
+     * Carga los roles de WordPress disponibles en un elemento select.
+     * @param {jQuery} $selectElement El elemento select jQuery.
+     * @param {string} currentRoleKey La clave del rol actualmente seleccionado para el usuario.
+     */
+    function loadWordPressRolesIntoSelect($selectElement, currentRoleKey) {
+        $selectElement.html('<option value="">Cargando roles...</option>').prop('disabled', true); // Placeholder y deshabilitar
+        performAjaxRequest(
+            'crm_get_wordpress_roles', // Acción AJAX definida en PHP
+            {}, // Sin datos adicionales necesarios
+            function(roles) { // onSuccess
+                $selectElement.empty(); // Limpiar placeholder
+                if (roles && roles.length > 0) {
+                    roles.forEach(role => {
+                        const $option = $('<option>', { value: role.key, text: role.name });
+                        if (role.key === currentRoleKey) {
+                            $option.prop('selected', true);
+                        }
+                        $selectElement.append($option);
+                    });
+                } else {
+                    $selectElement.append('<option value="">No hay roles disponibles</option>');
+                }
+                $selectElement.prop('disabled', false); // Habilitar select
+            },
+            function() { // onError (además del manejador global en performAjaxRequest)
+                $selectElement.html('<option value="">Error al cargar roles</option>').prop('disabled', true);
+            }
+        );
+    }
+    /**
      * Guarda los detalles modificados del contacto vía AJAX.
      */
     function saveContactDetails(userId) {
@@ -764,6 +265,7 @@
             first_name: $('#edit-contact-first-name').val(), // Nuevo
             last_name: $('#edit-contact-last-name').val(),   // Nuevo
             email: $('#edit-contact-email').val(),
+            role_key: $('#edit-contact-role').val(), // Nuevo: enviar la clave del rol
             tag_key: $('#edit-contact-tag').val(),
             notes: $('#edit-contact-notes').val()
         };
@@ -788,217 +290,6 @@
     // --- Ejecución Principal (DOM Ready) ---
     $(document).ready(function() {
         crm_js_log('DOM listo. Iniciando script del plugin.');
-
-        // Verificar en qué pestaña estamos (leyendo la URL o un elemento específico)
-        const urlParams = new URLSearchParams(window.location.search);
-        const currentPage = urlParams.get('page');
-        const currentTab = urlParams.get('tab');
-
-        crm_js_log(`Página actual: ${currentPage}, Pestaña: ${currentTab}`);
-
-        // Inicializar DataTables y otros elementos específicos de la pestaña activa
-        if (currentPage === 'crm-evolution-sender-main') {
-            if (!currentTab || currentTab === 'instancias') {
-                if ($('#instances-table').length) {
-                    initInstancesTable();
-                } else {
-                    crm_js_log('Contenedor de tabla de instancias no encontrado al cargar.', 'WARN');
-                }
-            } else if (currentTab === 'usuarios') {
-                if ($('#users-table').length) {
-                    initUsersTable();
-                    // Inicializar intl-tel-input (si existe el campo)
-                    const phoneInputField = document.querySelector("#user_phone_input");
-                    if (phoneInputField) {
-                        crm_js_log('Inicializando intl-tel-input en #user_phone_input');
-                        try {
-                            phoneInputInstance = window.intlTelInput(phoneInputField, {
-                                utilsScript: crm_evolution_sender_params.utils_script_path,
-                                initialCountry: "auto",
-                                geoIpLookup: function(callback) {
-                                    $.get("https://ipinfo.io", function() {}, "jsonp").always(function(resp) {
-                                        var countryCode = (resp && resp.country) ? resp.country : "pe";
-                                        callback(countryCode);
-                                    });
-                                },
-                                separateDialCode: true,
-                                preferredCountries: ['pe', 'co', 'mx', 'es', 'ar', 'us'],
-                                nationalMode: false,
-                                autoPlaceholder: "polite"
-                            });
-                            crm_js_log('Instancia de intl-tel-input creada.');
-                        } catch (error) {
-                            crm_js_log('Error al inicializar intl-tel-input.', 'ERROR', error);
-                            showNotification('Error', 'error', 'No se pudo inicializar el campo de teléfono.');
-                        }
-                    } else {
-                        crm_js_log('#user_phone_input no encontrado en el DOM al cargar la pestaña de usuarios.', 'WARN');
-                    }
-                } else {
-                    crm_js_log('Contenedor de tabla de usuarios no encontrado al cargar.', 'WARN');
-                }
-            } else if (currentTab === 'marketing') {
-                if ($('#campaigns-table').length) {
-                    initCampaignsTable();
-                } else {
-                    crm_js_log('Contenedor de tabla de campañas no encontrado al cargar.', 'WARN');
-                }
-                // Cargar selects del modal de campañas (ya lo tienes fuera, pero aquí también es válido si solo se usa en esta pestaña)
-                // if ($('#marketing-modal-content').length) {
-                //     loadCampaignModalSelects();
-                // }
-            }
-        }
-
-        // --- INICIO: Lógica para Pestaña Marketing (Formulario y Media) ---
-
-        const campaignForm = $('#campaign-form');
-        const campaignModalContent = $('#marketing-modal-content'); // Contenedor del modal
-
-        // Manejar el envío del formulario de Campaña (Crear/Actualizar)
-        if (campaignForm.length) {
-            // Usar .off().on() para evitar múltiples bindings si este código se ejecuta más de una vez
-            campaignForm.off('submit.crmCampaign').on('submit.crmCampaign', function(event) {
-                event.preventDefault(); // Evitar envío normal del formulario
-                crm_js_log('Formulario de campaña enviado.');
-
-                const submitButton = $(this).find('input[type="submit"]');
-                // Guardar el texto original ANTES de deshabilitar
-                const originalButtonText = submitButton.val();
-                submitButton.val('Guardando...').prop('disabled', true);
-
-                // Recoger datos del formulario
-                const formData = {
-                    action: 'crm_save_campaign', // La acción AJAX que creamos en PHP
-                    _ajax_nonce: crm_evolution_sender_params.nonce,
-                    campaign_id: $('#campaign_id').val(), // ID para saber si es edición
-                    campaign_name: $('#campaign_name').val(),
-                    campaign_instance: $('#campaign_instance').val(),
-                    campaign_target_tag: $('#campaign_target_tag').val(),
-                    campaign_interval: $('#campaign_interval').val() || 5, // Valor por defecto si está vacío
-                    campaign_media_url: $('#campaign_media_url').val(),
-                    campaign_message: $('#campaign_message').val()
-                };
-
-                crm_js_log('Datos a enviar para guardar campaña:', 'DEBUG', formData);
-
-                // Realizar la petición AJAX
-                $.ajax({
-                    url: crm_evolution_sender_params.ajax_url,
-                    type: 'POST',
-                    data: formData,
-                    success: function(response) {
-                        if (response.success) {
-                            crm_js_log('Respuesta AJAX éxito (guardar campaña):', 'INFO', response);
-                            showNotification(response.data.message || 'Campaña guardada correctamente.', 'success');
-                            tb_remove(); // Cerrar el modal Thickbox
-
-                            // Resetear el formulario
-                            campaignForm[0].reset();
-                            $('#campaign_id').val(''); // Limpiar ID oculto
-                            $('#media-filename').text('').hide(); // Limpiar nombre de archivo multimedia
-                            $('#clear-media-button').hide(); // Ocultar botón de limpiar media
-
-                            // Recargar la tabla de campañas si ya está inicializada
-                            if (typeof campaignsTable !== 'undefined' && campaignsTable) {
-                                campaignsTable.ajax.reload();
-                                crm_js_log('Tabla de campañas recargada.');
-                            } else {
-                                crm_js_log('Variable campaignsTable no definida, no se puede recargar.', 'WARN');
-                                // Si la tabla no estaba inicializada (ej: primera campaña), inicializarla ahora
-                                if ($('#campaigns-table').length) {
-                                    initCampaignsTable();
-                                }
-                            }
-                        } else {
-                            crm_js_log('Respuesta AJAX error (guardar campaña):', 'ERROR', response);
-                            showNotification(response.data.message || 'Error desconocido al guardar.', 'error');
-                        }
-                    },
-                    error: function(xhr, status, error) {
-                        crm_js_log('Error AJAX (guardar campaña):', 'ERROR', { status: status, error: error, response: xhr.responseText });
-                        showNotification('Error de conexión al guardar la campaña.', 'error');
-                    },
-                    complete: function() {
-                        // Restaurar el botón de envío usando la variable guardada
-                        submitButton.val(originalButtonText).prop('disabled', false);
-                    }
-                });
-            });
-        } else {
-            crm_js_log('Formulario #campaign-form no encontrado.', 'WARN');
-        }
-
-        // --- Lógica para los botones de seleccionar/limpiar multimedia ---
-        const mediaInput = $('#campaign_media_url');
-        const mediaFilename = $('#media-filename');
-        const selectMediaButton = $('#select-media-button');
-        const clearMediaButton = $('#clear-media-button');
-        let mediaFrame; // Variable para guardar la instancia del media uploader
-
-        if (selectMediaButton.length && mediaInput.length) {
-            // Usar delegación de eventos con $(document) para asegurar que funcione incluso si el modal se carga dinámicamente
-            // Usar .off().on() para evitar bindings múltiples
-            $(document).off('click.crmMedia', '#select-media-button').on('click.crmMedia', '#select-media-button', function(event) {
-                event.preventDefault();
-                crm_js_log('Botón Seleccionar Media clickeado.');
-
-                // Si ya existe un frame, simplemente ábrelo
-                if (mediaFrame) {
-                    mediaFrame.open();
-                    return;
-                }
-
-                // Crear un nuevo media frame
-                mediaFrame = wp.media({
-                    title: 'Seleccionar o Subir Multimedia',
-                    button: {
-                        text: 'Usar este archivo'
-                    },
-                    multiple: false // No permitir selección múltiple
-                });
-
-                // Cuando se selecciona un archivo
-                mediaFrame.on('select', function() {
-                    const attachment = mediaFrame.state().get('selection').first().toJSON();
-                    mediaInput.val(attachment.url); // Poner la URL en el input
-                    // Mostrar solo el nombre del archivo, no la ruta completa
-                    mediaFilename.text('Archivo: ' + (attachment.filename || attachment.url.split('/').pop())).show();
-                    clearMediaButton.show(); // Mostrar botón de limpiar
-                    crm_js_log('Archivo multimedia seleccionado:', 'DEBUG', attachment);
-                });
-
-                // Abrir el media frame
-                mediaFrame.open();
-            });
-
-            // Lógica para el botón de limpiar multimedia
-            if (clearMediaButton.length) {
-                $(document).off('click.crmMedia', '#clear-media-button').on('click.crmMedia', '#clear-media-button', function(event) {
-                    event.preventDefault();
-                    mediaInput.val(''); // Limpiar input
-                    mediaFilename.text('').hide(); // Ocultar nombre de archivo
-                    $(this).hide(); // Ocultar este botón
-                    crm_js_log('Campo multimedia limpiado.');
-                });
-
-                // Opcional: Mostrar botón limpiar si el campo ya tiene valor al abrir modal (para editar)
-                // Esto se manejaría mejor al *abrir* el modal para editar, no aquí globalmente.
-            }
-
-        } else {
-            crm_js_log('Botón #select-media-button o input #campaign_media_url no encontrado.', 'WARN');
-        }
-
-        // --- FIN: Lógica para Pestaña Marketing ---
-
-
-
-
-        // Inicializar los manejadores de eventos generales (YA EXISTENTE)
-        // Asegúrate de que initEventHandlers() no duplique los manejadores que acabamos de poner aquí.
-        // Si initEventHandlers() ya maneja los botones de media o el submit del form, quita el código duplicado de allí.
-        initEventHandlers();
 
         // --- INICIO: Lógica para Historial de Chats ---
         // Solo ejecutar en la página de historial de chats
@@ -1040,38 +331,37 @@
                 loadContactDetails(userId); // Simplemente recargar los detalles originales
             });
             // --- FIN: Listener para el botón Editar Contacto ---
-            // DENTRO de $(document).ready(function() { ... })
-            // Y DENTRO de if ($('#crm-chat-container').length) { ... }
+
             
-                // --- INICIO: Listener para maximizar imágenes del chat ---
-                $('#chat-messages-area').on('click', '.message-media img', function(event) {
-                    event.preventDefault(); // Prevenir comportamiento por defecto si la imagen está en un enlace
-                    const imageUrl = $(this).attr('src');
-                    const imageAlt = $(this).attr('alt') || 'Imagen del chat';
-            
-                    if (imageUrl) {
-                        crm_js_log(`Maximizando imagen: ${imageUrl}`, 'DEBUG');
-                        Swal.fire({
-                            imageUrl: imageUrl,
-                            imageAlt: imageAlt,
-                            imageWidth: '90%', // O un tamaño específico como 800
-                            imageHeight: 'auto',
-                            animation: false, // Opcional: quitar animación de SweetAlert
-                            showConfirmButton: false, // No necesitamos botón de confirmar
-                            showCloseButton: true, // Mostrar botón de cerrar
-                            backdrop: `
-                                rgba(0,0,0,0.6)
-                            `,
-                            customClass: { // Clases personalizadas para más estilo si es necesario
-                                popup: 'swal2-image-popup', // Para el contenedor del modal
-                                image: 'swal2-maximized-image' // Para la imagen misma
-                            }
-                        });
-                    }
-                });
-                crm_js_log('Listener para maximizar imágenes del chat inicializado.', 'INFO');
-                // --- FIN: Listener para maximizar imágenes del chat ---
-            
+            // --- INICIO: Listener para maximizar imágenes del chat ---
+            $('#chat-messages-area').on('click', '.message-media img', function(event) {
+                event.preventDefault(); // Prevenir comportamiento por defecto si la imagen está en un enlace
+                const imageUrl = $(this).attr('src');
+                const imageAlt = $(this).attr('alt') || 'Imagen del chat';
+        
+                if (imageUrl) {
+                    crm_js_log(`Maximizando imagen: ${imageUrl}`, 'DEBUG');
+                    Swal.fire({
+                        imageUrl: imageUrl,
+                        imageAlt: imageAlt,
+                        imageWidth: '90%', // O un tamaño específico como 800
+                        imageHeight: 'auto',
+                        animation: false, // Opcional: quitar animación de SweetAlert
+                        showConfirmButton: false, // No necesitamos botón de confirmar
+                        showCloseButton: true, // Mostrar botón de cerrar
+                        backdrop: `
+                            rgba(0,0,0,0.6)
+                        `,
+                        customClass: { // Clases personalizadas para más estilo si es necesario
+                            popup: 'swal2-image-popup', // Para el contenedor del modal
+                            image: 'swal2-maximized-image' // Para la imagen misma
+                        }
+                    });
+                }
+            });
+            crm_js_log('Listener para maximizar imágenes del chat inicializado.', 'INFO');
+            // --- FIN: Listener para maximizar imágenes del chat ---
+        
             // --- INICIO: Lógica para Vista Ampliada y Actualización de Avatar ---
             let avatarMediaFrame; // Para el selector de medios del avatar
             let currentEditingAvatarUserId = null; // Para saber a qué usuario pertenece el avatar que se está editando/viendo
@@ -1204,7 +494,7 @@
 
                 // Opcional: Desmarcar el chat activo en la lista izquierda
                 $('#chat-list-items .chat-list-item.active').removeClass('active');
-                currentOpenChatUserId = null; // Indicar que no hay chat abierto (si usas esta variable)
+                // currentOpenChatUserId = null; // Indicar que no hay chat abierto (si usas esta variable) <-- MODIFICACIÓN
             }
         }
 
@@ -1327,7 +617,6 @@
             });
             crm_js_log('Handler para #close-contact-details inicializado.'); // Log para confirmar
         }
-        
              
          
         crm_js_log('Script del plugin CRM Evolution Sender inicializado completamente.');
@@ -1468,6 +757,12 @@
                         const messageDate = new Date(msg.timestamp * 1000);
                         const timeString = messageDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
                         const messageClass = msg.is_outgoing ? 'chat-message outgoing' : 'chat-message incoming';
+                        let participantNameHtml = '';
+
+                        // Mostrar nombre del participante para mensajes entrantes de grupo
+                        if (!msg.is_outgoing && msg.participant_pushname) {
+                            participantNameHtml = `<div class="message-participant-name">${escapeHtml(msg.participant_pushname)}</div><hr />`;
+                        }
 
                         let messageContentHtml = '';
 
@@ -1517,6 +812,7 @@
                         const messageHtml = `
                             <div class="${messageClass}" data-msg-id="${msg.id}">
                                 <div class="message-bubble">
+                                    ${participantNameHtml}
                                     ${messageContentHtml}
                                     <div class="message-time">${timeString}</div>
                                 </div>
@@ -1691,22 +987,19 @@
                     <div class="contact-avatar-area" style="text-align: center; margin-bottom: 15px;">
                         <img src="${escapeHtml(details.avatar_url)}" alt="Avatar de ${escapeHtml(details.display_name)}" class="contact-details-avatar" style="width: 80px; height: 80px; border-radius: 50%; margin: 0 auto; display: block;">
                     </div>
+
+                    <h4 class="contact-details-section-title">Datos de WordPress</h4>
                     <div class="form-field">
                         <label>Nombre:</label>
                         <span>${escapeHtml(details.display_name)}</span>
                     </div>
                     <div class="form-field">
                         <label>Nombres:</label>
-                        <span>${escapeHtml(details.first_name || '')}</span>
+                        <span>${escapeHtml(details.first_name || 'N/D')}</span>
                     </div>
                     <div class="form-field">
                         <label>Apellidos:</label>
-                        <span>${escapeHtml(details.last_name || '')}</span>
-                    </div>
-                    <div class="form-field">
-                        <label>Teléfono:</label>
-                        <span>${escapeHtml(details.phone)}</span>
-                        ${details.jid ? `<small style="display: block; color: #666;">(JID: ${escapeHtml(details.jid)})</small>` : ''}
+                        <span>${escapeHtml(details.last_name || 'N/D')}</span>
                     </div>
                     <div class="form-field">
                         <label>Email:</label>
@@ -1714,16 +1007,22 @@
                     </div>
                     <div class="form-field">
                         <label>Rol:</label>
-                        <span>${escapeHtml(details.role)}</span>
+                        <span data-role-key="${escapeHtml(details.role_key || '')}">${escapeHtml(details.role || 'N/D')}</span>
                     </div>
                     <div class="form-field">
                         <label>Registrado:</label>
-                        <span>${escapeHtml(details.registration_date)}</span>
+                        <span>${escapeHtml(details.registration_date || 'N/D')}</span>
+                    </div>
+
+                    <h4 class="contact-details-section-title">Datos del CRM (Metas)</h4>
+                    <div class="form-field">
+                        <label>Teléfono:</label>
+                        <span>${escapeHtml(details.phone)}</span>
+                        ${details.jid ? `<small style="display: block; color: #666;">(JID: ${escapeHtml(details.jid)})</small>` : ''}
                     </div>
                     <div class="form-field">
                         <label>Etiqueta:</label>
                         <span class="tag-badge" data-tag-key="${escapeHtml(details.tag_key)}">${escapeHtml(details.tag_name)}</span>
-                        <!-- TODO: Añadir botón/icono para editar etiqueta -->
                     </div>
                     <div class="form-field">
                         <label>Notas:</label>
@@ -1731,28 +1030,27 @@
                             ${details.notes ? escapeHtml(details.notes).replace(/\n/g, '<br>') : '<i>Sin notas</i>'}
                         </div>
                     </div>
+
+                    <h4 class="contact-details-section-title">Datos WooCommerce</h4>
                     ${details.last_purchase && details.last_purchase.id ? `
-                    <hr>
                     <div class="form-field">
                         <label style="font-weight: bold; margin-bottom: 8px; display: block; color: #333;">Última Compra:</label>
                         <div class="last-purchase-details" style="font-size: 0.9em; line-height: 1.6;">
                             <p style="margin: 0 0 5px 0;"><strong>ID Orden:</strong> 
                                 ${details.last_purchase.url ? `<a href="${escapeHtml(details.last_purchase.url)}" target="_blank" title="Ver orden en WooCommerce">#${escapeHtml(details.last_purchase.id)}</a>` : `#${escapeHtml(details.last_purchase.id)}`}
                             </p>
-                            <p style="margin: 0 0 5px 0;"><strong>Fecha:</strong> ${escapeHtml(details.last_purchase.date)}</p>
-                            <p style="margin: 0 0 5px 0;"><strong>Total:</strong> ${details.last_purchase.total}</p>
-                            <p style="margin: 0 0 5px 0;"><strong>Estado:</strong> <span class="order-status-badge" style="padding: 2px 6px; border-radius: 3px; background-color: #eee; color: #333;">${escapeHtml(details.last_purchase.status)}</span></p>
+                            <p style="margin: 0 0 5px 0;"><strong>Fecha:</strong> ${escapeHtml(details.last_purchase.date || 'N/D')}</p>
+                            <p style="margin: 0 0 5px 0;"><strong>Total:</strong> ${details.last_purchase.total || 'N/D'}</p>
+                            <p style="margin: 0 0 5px 0;"><strong>Estado:</strong> <span class="order-status-badge" style="padding: 2px 6px; border-radius: 3px; background-color: #eee; color: #333;">${escapeHtml(details.last_purchase.status || 'N/D')}</span></p>
                         </div>
                     </div>
                     ` : `
-                    <hr>
                     <div class="form-field">
                         <label style="font-weight: bold; margin-bottom: 8px; display: block; color: #333;">Última Compra:</label>
                         <p style="margin: 0; font-size: 0.9em; color: #666;"><em>No se encontraron compras recientes.</em></p>
                     </div>
                     `}
                     ${details.customer_history && details.customer_history.total_orders !== null ? ` <!-- Verifica si existe el historial -->
-                    <hr>
                     <div class="customer-history-panel">
                         <h4 class="customer-history-title" style="cursor: pointer; margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center;">
                             Historial de Cliente (WooCommerce)
@@ -1760,15 +1058,17 @@
                         </h4>
                         <div class="customer-history-content" style="font-size: 0.9em; line-height: 1.6; padding-left: 10px; border-left: 2px solid #eee; margin-left: 5px;">
                             <p style="margin: 0 0 5px 0;"><strong>Total Pedidos:</strong> ${escapeHtml(details.customer_history.total_orders)}</p>
-                            <p style="margin: 0 0 5px 0;"><strong>Ingresos Totales:</strong> ${details.customer_history.total_revenue}</p> <!-- Ya viene formateado con wc_price -->
-                            <p style="margin: 0 0 5px 0;"><strong>Valor Promedio Pedido:</strong> ${details.customer_history.average_order_value}</p> <!-- Ya viene formateado con wc_price -->
+                            <p style="margin: 0 0 5px 0;"><strong>Ingresos Totales:</strong> ${details.customer_history.total_revenue || 'N/D'}</p> <!-- Ya viene formateado con wc_price -->
+                            <p style="margin: 0 0 5px 0;"><strong>Valor Promedio Pedido:</strong> ${details.customer_history.average_order_value || 'N/D'}</p> <!-- Ya viene formateado con wc_price -->
                         </div>
                     </div>
-                    ` : ''
+                    ` : `
+                    <p style="margin: 10px 0 5px 0; font-size: 0.9em; color: #666;"><em>No hay historial de cliente disponible.</em></p>
+                    `
                     }
 
                     <hr>
-                    <div style="text-align: right;">
+                    <div style="text-align: right; margin-top: 20px;">
                             <button id="edit-contact-button" class="button" data-user-id="${details.user_id}"><span class="dashicons dashicons-edit" style="vertical-align: middle; margin-top: -2px;"></span> Editar</button>
                     </div>
                 `;
@@ -1861,6 +1161,12 @@
         const messageDate = new Date(msg.timestamp * 1000);
         const timeString = messageDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
         const messageClass = msg.is_outgoing ? 'chat-message outgoing' : 'chat-message incoming';
+        let participantNameHtml = '';
+
+        // Mostrar nombre del participante para mensajes entrantes de grupo
+        if (!msg.is_outgoing && msg.participant_pushname) {
+            participantNameHtml = `<div class="message-participant-name">${escapeHtml(msg.participant_pushname)}</div>`;
+        }
 
         let messageContentHtml = '';
         // Reutilizar la lógica de renderizado de tipos de mensaje
@@ -1879,6 +1185,7 @@
         const messageHtml = `
             <div class="${messageClass}" data-msg-id="${msg.id}">
                 <div class="message-bubble">
+                    ${participantNameHtml}
                     ${messageContentHtml}
                     <div class="message-time">${timeString}</div>
                 </div>
@@ -1888,14 +1195,12 @@
         return msg.timestamp;
     }
 
-
     // =========================================================================
     // == API HEARTBEAT PARA ACTUALIZACIONES DE CHAT ==
     // =========================================================================
 
     let currentOpenChatUserId = null; // ID del usuario cuya conversación está abierta
     let lastDisplayedMessageTimestamp = 0; // Timestamp del último mensaje mostrado en el chat abierto
-
     let lastChatCheckTimestamp = Math.floor(Date.now() / 1000); // Timestamp inicial al cargar la página
 
     /**

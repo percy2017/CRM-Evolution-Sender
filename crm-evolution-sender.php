@@ -24,16 +24,13 @@ define( 'CRM_EVOLUTION_SENDER_PLUGIN_URL', plugin_dir_url( __FILE__ ) );
 define( 'CRM_EVOLUTION_SENDER_TEXT_DOMAIN', 'crm-evolution-sender' );
 
 // --- Archivos Requeridos ---
-// require_once CRM_EVOLUTION_SENDER_PLUGIN_DIR . 'crm-main.php';
 require_once CRM_EVOLUTION_SENDER_PLUGIN_DIR . 'crm-setting.php';
 require_once CRM_EVOLUTION_SENDER_PLUGIN_DIR . 'crm-ajax-handlers.php';
 require_once CRM_EVOLUTION_SENDER_PLUGIN_DIR . 'crm-rest-api.php';
-require_once CRM_EVOLUTION_SENDER_PLUGIN_DIR . 'crm-instances.php'; // <-- Movido después de crm-rest-api.php
+require_once CRM_EVOLUTION_SENDER_PLUGIN_DIR . 'crm-instances.php';
 require_once CRM_EVOLUTION_SENDER_PLUGIN_DIR . 'crm-cpt-chat.php';
 require_once CRM_EVOLUTION_SENDER_PLUGIN_DIR . 'crm-cpt-campaign.php';
 require_once CRM_EVOLUTION_SENDER_PLUGIN_DIR . 'crm-chat-history.php';
-
-// --- Hooks ---
 
 /**
  * Registra el menú principal en el administrador de WordPress.
@@ -44,7 +41,7 @@ function crm_evolution_sender_admin_menu() {
         __( 'CRM Evolution', CRM_EVOLUTION_SENDER_TEXT_DOMAIN ), // Título del menú
         'manage_options', // Capacidad requerida
         'crm-evolution-sender-main', // Slug del menú
-        'crm_render_instances_page_html', // <--- CAMBIO AQUÍ: Nueva función callback (definida en crm-instances.php)
+        'crm_render_instances_page_html',
         'dashicons-whatsapp', // Icono (WhatsApp)
         25 // Posición
     );
@@ -55,7 +52,7 @@ function crm_evolution_sender_admin_menu() {
         __( 'Conversaciones', CRM_EVOLUTION_SENDER_TEXT_DOMAIN ),       // Título del submenú
         'edit_posts',                                    // Capacidad requerida (ver chats)
         'crm-evolution-chat-history',                    // Slug de este submenú
-        'crm_evolution_sender_chat_history_page_html'    // Función que muestra el contenido (de crm-chat-history.php)
+        'crm_evolution_sender_chat_history_page_html'
     );
     // Página de Ajustes (como submenú)
     add_submenu_page(
@@ -74,10 +71,7 @@ function crm_evolution_sender_admin_menu() {
     //     'edit_posts',                                    // Capacidad requerida para ver posts
     //     'edit.php?post_type=crm_chat',                   // Slug: URL directa a la lista del CPT
     //     null                                             // No necesita función de callback, WP maneja edit.php
-    // );
-
-    
-    
+    // );    
 }
 add_action( 'admin_menu', 'crm_evolution_sender_admin_menu' );
 
@@ -409,5 +403,31 @@ function crm_render_user_list_columns( $value, $column_name, $user_id ) {
     return $value; // Devolver valor por defecto para otras columnas
 }
 add_filter( 'manage_users_custom_column', 'crm_render_user_list_columns', 10, 3 );
+
+// =========================================================================
+// == AÑADIR ENLACE A LA TOOLBAR (ADMIN BAR) ==
+// =========================================================================
+
+/**
+ * Añade un enlace directo al "Historial de Chats CRM" en la Toolbar de WordPress.
+ *
+ * @param WP_Admin_Bar $wp_admin_bar Objeto WP_Admin_Bar.
+ */
+function crm_add_chat_history_link_to_toolbar( $wp_admin_bar ) {
+    // Verificar si el usuario actual tiene la capacidad para ver el historial de chats
+    if ( ! current_user_can( 'edit_posts' ) ) {
+        return;
+    }
+
+    $args = array(
+        'id'    => 'crm_chat_history_toolbar',
+        'title' => '<span class="ab-icon dashicons-format-chat" style="top:3px;"></span>' . __( 'Historial de Chats CRM', CRM_EVOLUTION_SENDER_TEXT_DOMAIN ),
+        'href'  => admin_url( 'admin.php?page=crm-evolution-chat-history' ),
+        'meta'  => array( 'class' => 'crm-chat-history-toolbar-link' )
+    );
+    $wp_admin_bar->add_node( $args );
+}
+add_action( 'admin_bar_menu', 'crm_add_chat_history_link_to_toolbar', 999 );
+
 
 ?>

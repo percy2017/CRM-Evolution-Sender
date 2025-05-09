@@ -33,8 +33,9 @@ function crm_evolution_api_request( $method, $endpoint, $body = [], $instance_ap
         return new WP_Error( 'api_config_error', 'Se requiere una API Key (Global o específica) para realizar la petición.' );
     }
 
-    $request_url = trailingslashit( $api_url_base ) . ltrim( $endpoint, '/' );
-    // //crm_log( "Realizando petición API: [{$method}] {$request_url}", 'DEBUG' );
+    $request_url = trailingslashit( $api_url_base ) . ltrim( $endpoint, '/' ); 
+    // $url = rtrim($server_url, '/') . '/' . ltrim($endpoint, '/');
+
 
     $args = array(
         'method'  => strtoupper( $method ),
@@ -87,343 +88,98 @@ function crm_evolution_api_request( $method, $endpoint, $body = [], $instance_ap
     }
 }
 
-
 /**
- * AJAX Handler para obtener la lista de instancias desde la API Evolution.
+ * Realiza una solicitud a la API de Evolution (Versión 2).
+ * Maneja parámetros GET en la URL y datos en el cuerpo para POST/PUT/DELETE.
+ *
+ * @param string $endpoint El endpoint de la API a consultar.
+ * @param array  $data_params Los datos a enviar (como query para GET, como body para otros métodos).
+ * @param string $method   El método HTTP (POST, GET, etc.). Por defecto GET.
+ * @param string|null $instanceName El nombre de la instancia a utilizar para la API Key.
+ * @return array|WP_Error Los datos de la respuesta decodificados o un WP_Error en caso de fallo.
  */
-function crm_get_instances_callback() {
-    // 1. Verificar Nonce y Permisos
-    check_ajax_referer( 'crm_evolution_sender_nonce', '_ajax_nonce' );
-    if ( ! current_user_can( 'manage_options' ) ) {
-        //crm_log( 'Error AJAX: Permiso denegado para crm_get_instances.', 'ERROR' );
-        wp_send_json_error( array( 'message' => 'No tienes permisos suficientes.' ), 403 );
+function crm_evolution_api_request_v2( $endpoint, $data_params = array(), $method = 'GET', $instanceName = null ) {
+    $api_url_base = get_option( 'crm_evolution_api_url', '' );
+    $global_api_token = get_option( 'crm_evolution_api_token', '' );
+
+    if ( empty( $api_url_base ) ) {
+        //crm_log( 'Error V2: La URL de la API no está configurada.', 'ERROR' );
+        return new WP_Error( 'api_config_error_v2', 'La URL de la API no está configurada en los ajustes.' );
     }
 
-    // --- INICIO DEBUG DIRECTO ---
-    $test_url = get_option( 'crm_evolution_api_url', 'FALLO_GET_OPTION' );
-    // //crm_log( '[DEBUG DIRECTO] Valor leído por get_option: ' . var_export( $test_url, true ), 'DEBUG' );
-
-    if ( empty( $test_url ) || $test_url === 'FALLO_GET_OPTION' ) {
-         //crm_log( '[DEBUG DIRECTO] ERROR: La variable $test_url está vacía o no se leyó la opción.', 'ERROR' );
-         wp_send_json_error( array( 'message' => 'Error interno leyendo la opción URL (Debug Directo).' ) );
-         return; // Salir si hay error
-    } else {
-        //  //crm_log( '[DEBUG DIRECTO] ÉXITO: La variable $test_url contiene: ' . $test_url, 'INFO' );
-    }
-    // --- FIN DEBUG DIRECTO ---
-
-    // 2. Llamar a la función auxiliar para hacer la petición a la API
-    //    El endpoint correcto según la documentación de Evolution API v1.8 es /instance/fetchInstances
-    $api_response = crm_evolution_api_request( 'GET', '/instance/fetchInstances' );
-
-    // 3. Procesar la respuesta de la API
-    if ( is_wp_error( $api_response ) ) {
-        // Si hubo un error en la petición (configuración, conexión, error API)
-        //crm_log( 'Error al obtener instancias de la API: ' . $api_response->get_error_message(), 'ERROR' );
-        wp_send_json_error( array( 'message' => $api_response->get_error_message() ) );
-
-    } elseif ( is_array( $api_response ) ) {
-
-        // //crm_log( 'Instancias obtenidas correctamente de la API.', 'INFO' );
-
-        // Mapear los datos si es necesario para que coincidan con lo que espera DataTables
-        $instances_data = array();
-        foreach ( $api_response as $instance ) {
-
-            $profile_pic_url = isset($instance['instance']['profilePictureUrl']) ? $instance['instance']['profilePictureUrl'] : null;
-
-            $instances_data[] = array(
-                'instance_name' => isset($instance['instance']['instanceName']) ? $instance['instance']['instanceName'] : 'N/D',
-                'status'        => isset($instance['instance']['status']) ? $instance['instance']['status'] : 'unknown',
-                'api_key'       => isset($instance['instance']['apiKey']) ? $instance['instance']['apiKey'] : null,
-                'owner'         => isset($instance['instance']['owner']) ? $instance['instance']['owner'] : null,
-                'profile_pic_url' => $profile_pic_url,
-            );
+    // Determinar qué API Key usar basado en $instanceName
+    $api_key_to_use = $global_api_token; // Por defecto, la global
+    if ( ! empty( $instanceName ) ) {
+        $instances_options = get_option('crm_evolution_instances', array());
+        if ( isset( $instances_options[$instanceName]['apikey'] ) && ! empty( $instances_options[$instanceName]['apikey'] ) ) {
+            $api_key_to_use = $instances_options[$instanceName]['apikey'];
+            //crm_log( "V2: Usando API Key específica para la instancia '{$instanceName}'.", 'DEBUG' );
+        } else {
+            //crm_log( "V2: No se encontró API Key específica para '{$instanceName}', usando API Key global.", 'DEBUG' );
         }
-
-        wp_send_json_success( $instances_data );
-
-    } else {
-        // La API devolvió algo inesperado (no es error ni array)
-         //crm_log( 'Respuesta inesperada de la API al obtener instancias.', 'ERROR', $api_response );
-        wp_send_json_error( array( 'message' => 'Respuesta inesperada de la API.' ) );
     }
 
-    // wp_die() es llamado automáticamente por wp_send_json_success/error
-}
-add_action( 'wp_ajax_crm_get_instances', 'crm_get_instances_callback' );
-
-
-/**
- * AJAX Handler para crear una nueva instancia.
- * Recibe datos del formulario Thickbox, incluyendo opciones adicionales y configuración de webhook.
- */
-function crm_create_instance_callback() {
-    //crm_log( 'Recibida petición AJAX: crm_create_instance' );
-
-    // 1. Verificar Nonce específico del formulario y Permisos
-    check_ajax_referer( 'crm_create_instance_action', 'crm_create_instance_nonce' ); // Correcto nonce del form
-    if ( ! current_user_can( 'manage_options' ) ) {
-        wp_send_json_error( array( 'message' => 'Permiso denegado.' ), 403 );
+    if ( empty( $api_key_to_use ) ) {
+         //crm_log( 'Error V2: No se encontró API Key (ni global ni específica) para la petición.', 'ERROR' );
+        return new WP_Error( 'api_config_error_v2', 'La API Key no está configurada (ni global ni para la instancia).' );
     }
 
-    // 2. Sanitizar datos de entrada (incluyendo los nuevos campos)
-    $instance_name = isset( $_POST['instance_name'] ) ? sanitize_key( $_POST['instance_name'] ) : '';
-    $webhook_url   = isset( $_POST['webhook_url'] ) ? esc_url_raw( wp_unslash( $_POST['webhook_url'] ) ) : ''; // Sanitizar URL
+    $request_url = trailingslashit( $api_url_base ) . ltrim( $endpoint, '/' );
+    $method = strtoupper($method); // Asegurar que el método esté en mayúsculas
 
-
-    // 3. Validar datos obligatorios
-    if ( empty( $instance_name ) ) {
-        wp_send_json_error( array( 'message' => 'El nombre de la instancia es obligatorio.' ) );
-    }
-    // Validar formato de nombre (opcional, pero bueno)
-    if (!preg_match('/^[a-zA-Z0-9_-]+$/', $instance_name)) {
-        wp_send_json_error( array( 'message' => 'Nombre de instancia inválido. Solo letras, números, guiones y guiones bajos.' ) );
-    }
-
-
-    // 4. Preparar datos para la API Evolution (/instance/create)
-    $body = array(
-        'instanceName' => $instance_name,
-        'qrcode'       => true,
-        'sync_full_history' => true,
-        'groups_ignore' => true,
-        'always_online' => true,
-        'webhook' => $webhook_url,
-        'webhook_base64' => true,
-        'events' => [
-            'MESSAGES_UPSERT',
-        ]
+    $args = array(
+        'method'    => $method,
+        'timeout'   => 45,
+        'redirection' => 5,
+        'httpversion' => '1.0',
+        'blocking'  => true,
+        'headers'   => array(
+            'apikey' => $api_key_to_use,
+            // 'Content-Type' se añade abajo si hay body
+        ),
+        'cookies'   => array(),
+        'sslverify' => false, // Manteniendo consistencia con la función original
     );
- 
-    // 5. Llamar a la API para crear
-    $api_response = crm_evolution_api_request( 'POST', '/instance/create', $body );
 
-    // 6. Procesar respuesta
-    if ( is_wp_error( $api_response ) ) {
-        // Comprobar si el error es específicamente 400 Bad Request
-        $error_data = $api_response->get_error_data();
-        $status_code = isset($error_data['status']) ? $error_data['status'] : null;
-        $error_message = 'Error API: ' . $api_response->get_error_message();
-        wp_send_json_error( array( 'message' => $error_message ), $status_code ?: 500 ); // Devolver código de error si está disponible
-    } else {
-        // Éxito
-        $message = isset($api_response['message']) ? $api_response['message'] : 'Instancia creada iniciada.';
-        // Intentar obtener el estado de la respuesta, puede variar la estructura
-        $status = null;
-        if (isset($api_response['instance']) && isset($api_response['instance']['status'])) {
-            $status = $api_response['instance']['status'];
-        } elseif (isset($api_response['status'])) { // A veces la API lo devuelve en el nivel raíz
-             $status = $api_response['status'];
+    if ( $method === 'GET' && ! empty( $data_params ) ) {
+        $request_url = add_query_arg( $data_params, $request_url );
+    } elseif ( in_array($method, array('POST', 'PUT', 'DELETE')) && ! empty( $data_params ) ) {
+        $args['body'] = wp_json_encode( $data_params );
+        $args['headers']['Content-Type'] = 'application/json'; // Añadir Content-Type solo si hay body
+    }
+
+    //crm_log( "API Request V2 - Method: {$method}, URL: {$request_url}, Args: " . print_r($args, true), 'DEBUG' );
+    $response = wp_remote_request( $request_url, $args );
+
+    if ( is_wp_error( $response ) ) {
+        //crm_log( 'Error V2 en wp_remote_request: ' . $response->get_error_message(), 'ERROR' );
+        return $response;
+    }
+
+    $body = wp_remote_retrieve_body( $response );
+    $http_code = wp_remote_retrieve_response_code( $response );
+    //crm_log( "API Response V2 - HTTP Code: {$http_code}, Body: {$body}", 'DEBUG' );
+
+    $decoded_body = json_decode( $body, true );
+
+    if ( $http_code >= 400 ) {
+        $error_message = 'Error en la API (V2): ' . $http_code;
+        if ( isset( $decoded_body['message'] ) ) {
+            $error_message .= ' - ' . $decoded_body['message'];
+        } elseif (isset($decoded_body['error'])) {
+            $error_message .= ' - ' . $decoded_body['error'];
         }
-
-        //crm_log( "Instancia {$instance_name} creada. Respuesta API:", 'INFO', $api_response );
-        wp_send_json_success( array( 'message' => $message, 'status' => $status ) );
+        //crm_log( $error_message, 'ERROR' );
+        return new WP_Error( 'api_error_v2', $error_message, array( 'status' => $http_code, 'response' => $decoded_body ) );
     }
+    
+    if ( json_last_error() !== JSON_ERROR_NONE && !empty($body) ) { // Solo error si el body no estaba vacío
+        //crm_log( 'Error V2 al decodificar JSON de la respuesta: ' . json_last_error_msg() . ' - Body: ' . $body, 'ERROR' );
+        return new WP_Error( 'json_decode_error_v2', 'Error al decodificar la respuesta JSON de la API (V2).', array( 'body' => $body ) );
+    }
+
+    return $decoded_body;
 }
-
-// La acción add_action ya está registrada, no necesita cambios.
-add_action( 'wp_ajax_crm_create_instance', 'crm_create_instance_callback' ); // La acción ya está registrada
-
-
-/**
- * AJAX Handler para eliminar una instancia.
- */
-function crm_delete_instance_callback() {
-     //crm_log( 'Recibida petición AJAX: crm_delete_instance' );
-    check_ajax_referer( 'crm_evolution_sender_nonce', '_ajax_nonce' );
-    if ( ! current_user_can( 'manage_options' ) ) {
-        wp_send_json_error( array( 'message' => 'Permiso denegado.' ), 403 );
-    }
-
-    $instance_name = isset( $_POST['instance_name'] ) ? sanitize_key( $_POST['instance_name'] ) : '';
-
-    if ( empty( $instance_name ) ) {
-        wp_send_json_error( array( 'message' => 'Nombre de instancia no proporcionado.' ) );
-    }
-
-    // Llamar a la API para eliminar (Endpoint /instance/delete/{instanceName})
-    $endpoint = '/instance/delete/' . $instance_name;
-    $api_response = crm_evolution_api_request( 'DELETE', $endpoint );
-
-     if ( is_wp_error( $api_response ) ) {
-        // Manejar posible error 404 si la instancia ya no existe como éxito parcial
-        if ($api_response->get_error_data() && isset($api_response->get_error_data()['status']) && $api_response->get_error_data()['status'] == 404) {
-             //crm_log( "Intento de eliminar instancia {$instance_name} que no existe (404). Considerado éxito.", 'WARN' );
-             wp_send_json_success( array( 'message' => "La instancia {$instance_name} no se encontró o ya fue eliminada." ) );
-        } else {
-            wp_send_json_error( array( 'message' => 'Error API: ' . $api_response->get_error_message() ) );
-        }
-    } else {
-        //crm_log( "Instancia {$instance_name} eliminada. Respuesta API:", 'INFO', $api_response );
-        wp_send_json_success( array( 'message' => "Instancia {$instance_name} eliminada correctamente." ) );
-    }
-}
-add_action( 'wp_ajax_crm_delete_instance', 'crm_delete_instance_callback' );
-
-
-/**
- * AJAX Handler para obtener el QR Code de una instancia.
- */
-function crm_get_instance_qr_callback() {
-    // //crm_log( 'Recibida petición AJAX: crm_get_instance_qr' );
-    check_ajax_referer( 'crm_evolution_sender_nonce', '_ajax_nonce' );
-    if ( ! current_user_can( 'manage_options' ) ) {
-        wp_send_json_error( array( 'message' => 'Permiso denegado.' ), 403 );
-    }
-
-    $instance_name = isset( $_POST['instance_name'] ) ? sanitize_key( $_POST['instance_name'] ) : '';
-    if ( empty( $instance_name ) ) {
-        wp_send_json_error( array( 'message' => 'Nombre de instancia no proporcionado.' ) );
-    }
-
-    // Llamar a la API para conectar y obtener QR (Endpoint /instance/connect/{instanceName})
-    // Este endpoint inicia la conexión y devuelve el QR si es necesario.
-    $endpoint = '/instance/connect/' . $instance_name;
-    $api_response = crm_evolution_api_request( 'GET', $endpoint );
-
-    if ( is_wp_error( $api_response ) ) {
-        wp_send_json_error( array( 'message' => 'Error API: ' . $api_response->get_error_message() ) );
-    } else {
-        // Buscar el QR code en la respuesta (puede estar en 'qrcode.base64' o similar)
-        $qr_code_base64 = null;
-        if (isset($api_response['qrcode']) && isset($api_response['qrcode']['base64'])) {
-            $qr_code_base64 = $api_response['qrcode']['base64'];
-        } elseif (isset($api_response['base64'])) { // A veces la API lo devuelve directamente
-             $qr_code_base64 = $api_response['base64'];
-        }
-
-
-        if ($qr_code_base64) {
-            //  //crm_log( "QR Code obtenido para {$instance_name}.", 'INFO' );
-             // Asegurarse de que el base64 tenga el prefijo correcto para imagen
-             if (strpos($qr_code_base64, 'data:image') === false) {
-                 $qr_code_base64 = 'data:image/png;base64,' . $qr_code_base64;
-             }
-            wp_send_json_success( array( 'qrCode' => $qr_code_base64 ) );
-        } else {
-            //  //crm_log( "No se encontró QR Code en la respuesta para {$instance_name}. Estado puede ser otro.", 'WARN', $api_response );
-             $status = isset($api_response['instance']['status']) ? $api_response['instance']['status'] : 'desconocido';
-             $message = "No se necesita QR Code. Estado actual: {$status}.";
-             if ($status === 'connection') $message = "La instancia ya está conectada.";
-            wp_send_json_error( array( 'message' => $message ) );
-        }
-    }
-}
-add_action( 'wp_ajax_crm_get_instance_qr', 'crm_get_instance_qr_callback' );
-
-
-/**
- * AJAX Handler para conectar una instancia (si ya existe y está desconectada).
- */
-function crm_connect_instance_callback() {
-    // //crm_log( 'Recibida petición AJAX: crm_connect_instance' );
-    check_ajax_referer( 'crm_evolution_sender_nonce', '_ajax_nonce' );
-    if ( ! current_user_can( 'manage_options' ) ) {
-        wp_send_json_error( array( 'message' => 'Permiso denegado.' ), 403 );
-    }
-
-    $instance_name = isset( $_POST['instance_name'] ) ? sanitize_key( $_POST['instance_name'] ) : '';
-    if ( empty( $instance_name ) ) {
-        wp_send_json_error( array( 'message' => 'Nombre de instancia no proporcionado.' ) );
-    }
-
-    // Endpoint /instance/connect/{instanceName}
-    $endpoint = '/instance/connect/' . $instance_name;
-    $api_response = crm_evolution_api_request( 'GET', $endpoint );
-
-     if ( is_wp_error( $api_response ) ) {
-        wp_send_json_error( array( 'message' => 'Error API: ' . $api_response->get_error_message() ) );
-    } else {
-        $status = isset($api_response['instance']['status']) ? $api_response['instance']['status'] : null;
-        $message = "Intentando conectar instancia {$instance_name}.";
-        if ($status === 'qrcode') $message .= " Se requiere escanear QR.";
-        if ($status === 'connection') $message = "La instancia {$instance_name} ya está conectada.";
-
-        // //crm_log( $message, 'INFO', $api_response );
-        wp_send_json_success( array( 'message' => $message, 'status' => $status ) );
-    }
-}
-add_action( 'wp_ajax_crm_connect_instance', 'crm_connect_instance_callback' );
-
-
-/**
- * AJAX Handler para desconectar una instancia.
- */
-function crm_disconnect_instance_callback() {
-    // //crm_log( 'Recibida petición AJAX: crm_disconnect_instance' );
-    check_ajax_referer( 'crm_evolution_sender_nonce', '_ajax_nonce' );
-    if ( ! current_user_can( 'manage_options' ) ) {
-        wp_send_json_error( array( 'message' => 'Permiso denegado.' ), 403 );
-    }
-
-    $instance_name = isset( $_POST['instance_name'] ) ? sanitize_key( $_POST['instance_name'] ) : '';
-    if ( empty( $instance_name ) ) {
-        wp_send_json_error( array( 'message' => 'Nombre de instancia no proporcionado.' ) );
-    }
-
-    // Endpoint /instance/logout/{instanceName}
-    $endpoint = '/instance/logout/' . $instance_name;
-    $api_response = crm_evolution_api_request( 'DELETE', $endpoint );
-
-     if ( is_wp_error( $api_response ) ) {
-         // Podría dar error si ya está desconectada, tratar como éxito?
-        //  //crm_log( "Error API al desconectar {$instance_name}: " . $api_response->get_error_message(), 'ERROR' );
-        wp_send_json_error( array( 'message' => 'Error API: ' . $api_response->get_error_message() ) );
-    } else {
-        // //crm_log( "Instancia {$instance_name} desconectada.", 'INFO', $api_response );
-        wp_send_json_success( array( 'message' => "Instancia {$instance_name} desconectada." ) );
-    }
-}
-add_action( 'wp_ajax_crm_disconnect_instance', 'crm_disconnect_instance_callback' );
-
-/**
- * AJAX Handler para obtener instancias activas (conectadas o esperando QR) para selects.
- */
-function crm_get_active_instances_callback() {
-   error_log( 'Recibida petición AJAX: crm_get_active_instances' );
-
-   // 1. Seguridad: Verificar Nonce y Permisos.
-   // El nonce debe ser generado con la acción 'wp_rest' y enviado como 'security' desde el frontend.
-   check_ajax_referer( 'wp_rest', 'security' );
-
-   if ( ! current_user_can( 'manage_options' ) ) {
-       wp_send_json_error( array( 'message' => __( 'Permiso denegado.', CRM_EVOLUTION_SENDER_TEXT_DOMAIN ) ), 403 );
-   }
-
-   $api_response = crm_evolution_api_request( 'GET', '/instance/fetchInstances' );
-
-   if ( is_wp_error( $api_response ) ) {
-       wp_send_json_error( array( 'message' => 'Error API: ' . $api_response->get_error_message() ) );
-   } elseif ( is_array( $api_response ) ) {
-       $active_instances = array();
-       foreach ( $api_response as $instance ) {
-           $status = isset($instance['instance']['status']) ? $instance['instance']['status'] : 'unknown';
-           $instance_name_from_api = isset($instance['instance']['instanceName']) ? $instance['instance']['instanceName'] : null;
-
-           // Considerar activas las que están conectadas o esperando QR
-           // Añadimos 'open' como estado conectado también.
-           if ( $instance_name_from_api && in_array($status, ['open', 'connected', 'connection', 'qrcode', 'connecting']) ) {
-                // Formatear el texto del estado para ser más legible
-                $status_text = ucfirst($status);
-                if ($status === 'qrcode') $status_text = 'Esperando QR';
-                if ($status === 'connection' || $status === 'connected') $status_text = 'Conectada';
-                if ($status === 'connecting') $status_text = 'Conectando';
-
-                $active_instances[] = array(
-                   'value' => $instance_name_from_api,
-                   'text'  => $instance_name_from_api . ' (' . $status_text . ')',
-                );
-           }
-       }
-        // //crm_log( 'Instancias activas obtenidas: ' . count($active_instances), 'INFO' );
-       wp_send_json_success( $active_instances );
-   } else {
-       wp_send_json_error( array( 'message' => 'Respuesta inesperada de la API.' ) );
-   }
-}
-add_action( 'wp_ajax_crm_get_active_instances', 'crm_get_active_instances_callback' );
-
 
 // =========================================================================
 // == MANEJADORES AJAX - HISTORIAL DE CHATS ==
@@ -536,6 +292,9 @@ function crm_get_conversation_messages_ajax() {
     //crm_log( "Obteniendo mensajes para User ID: {$user_id}" );
 
     // 3. Obtener los mensajes de chat para ese usuario
+    // Determinar si el chat actual es un grupo
+    $is_group_chat = get_user_meta( $user_id, '_crm_is_group', true );
+
     $args = array(
         'post_type'      => 'crm_chat',
         'posts_per_page' => -1, // Obtener todos los mensajes de esta conversación
@@ -563,8 +322,11 @@ function crm_get_conversation_messages_ajax() {
             $post_id = get_the_ID();
             $attachment_id = get_post_meta( $post_id, '_crm_media_attachment_id', true );
             $message_content = get_the_content(); // Obtener contenido
-            //crm_log("Mensaje ID {$post_id}: Contenido obtenido por get_the_content(): " . $message_content, 'DEBUG'); // <-- Log añadido
-
+            $is_outgoing = (bool) get_post_meta( $post_id, '_crm_is_outgoing', true );
+            $participant_pushname = null;
+            if ($is_group_chat && !$is_outgoing) {
+                $participant_pushname = get_post_meta( $post_id, '_crm_pushName', true );
+            }
             $messages[] = array(
                 'id'            => $post_id,
                 'text'          => $message_content, // Usar variable
@@ -574,6 +336,7 @@ function crm_get_conversation_messages_ajax() {
                 'caption'       => get_post_meta( $post_id, '_crm_media_caption', true ), // Caption específico
                 'attachment_id' => $attachment_id ? (int) $attachment_id : null,
                 'attachment_url'=> $attachment_id ? wp_get_attachment_url( $attachment_id ) : null, // URL del adjunto
+                'participant_pushname' => $participant_pushname,
             );
         }
         wp_reset_postdata();
@@ -611,6 +374,9 @@ function crm_handle_heartbeat_request( $response, $data, $screen_id ) {
         $open_chat_user_id = absint( $data['crm_current_open_chat_id'] );
         $last_message_timestamp = absint( $data['crm_last_message_timestamp'] );
 
+        // Determinar si el chat abierto es un grupo
+        $is_open_chat_group = get_user_meta( $open_chat_user_id, '_crm_is_group', true );
+
         if ( $open_chat_user_id > 0 ) {
             // //crm_log( "Heartbeat: Chat abierto User ID: {$open_chat_user_id}. Buscando mensajes desde: {$last_message_timestamp}", 'DEBUG' );
             //crm_log( "Heartbeat: Chat abierto User ID: {$open_chat_user_id}. Buscando mensajes con timestamp > {$last_message_timestamp}", 'DEBUG' );
@@ -646,16 +412,23 @@ function crm_handle_heartbeat_request( $response, $data, $screen_id ) {
                     $query_open_chat->the_post();
                     $post_id = get_the_ID();
                     $attachment_id = get_post_meta( $post_id, '_crm_media_attachment_id', true );
+                    $is_outgoing_message = (bool) get_post_meta( $post_id, '_crm_is_outgoing', true );
+                    $participant_pushname_hb = null;
+
+                    if ($is_open_chat_group && !$is_outgoing_message) {
+                        $participant_pushname_hb = get_post_meta( $post_id, '_crm_pushName', true );
+                    }
                     // Formatear igual que en crm_get_conversation_messages_ajax
                     $new_messages_for_open_chat[] = array(
                         'id'            => $post_id,
                         'text'          => get_the_content(),
                         'timestamp'     => (int) get_post_meta( $post_id, '_crm_timestamp_wa', true ),
-                        'is_outgoing'   => (bool) get_post_meta( $post_id, '_crm_is_outgoing', true ),
+                        'is_outgoing'   => $is_outgoing_message,
                         'type'          => get_post_meta( $post_id, '_crm_message_type', true ),
                         'caption'       => get_post_meta( $post_id, '_crm_media_caption', true ),
                         'attachment_id' => $attachment_id ? (int) $attachment_id : null,
                         'attachment_url'=> $attachment_id ? wp_get_attachment_url( $attachment_id ) : null,
+                        'participant_pushname' => $participant_pushname_hb,
                     );
                 }
                 wp_reset_postdata();
@@ -701,19 +474,16 @@ function crm_handle_heartbeat_request( $response, $data, $screen_id ) {
     return $response;
 }
 add_filter( 'heartbeat_received', 'crm_handle_heartbeat_request', 10, 3 );
-add_filter( 'heartbeat_nopriv_received', 'crm_handle_heartbeat_request', 10, 3 ); // Opcional: si quieres que funcione para usuarios no logueados (improbable en admin)
+add_filter( 'heartbeat_nopriv_received', 'crm_handle_heartbeat_request', 10, 3 );
 
 /**
  * AJAX Handler para buscar usuarios de WP por nombre/email/login que tengan teléfono,
  * para iniciar un nuevo chat.
  */
 function crm_search_wp_users_for_chat_callback() {
-    //crm_log( 'Recibida petición AJAX: crm_search_wp_users_for_chat' );
-
     // 1. Verificar Nonce y Permisos
     check_ajax_referer( 'crm_evolution_sender_nonce', '_ajax_nonce' );
-    if ( ! current_user_can( 'edit_posts' ) ) { // Capacidad para ver chats
-        //crm_log( 'Error AJAX: Permiso denegado para crm_search_wp_users_for_chat.', 'ERROR' );
+    if ( ! current_user_can( 'edit_posts' ) ) { 
         wp_send_json_error( array( 'message' => 'No tienes permisos suficientes.' ), 403 );
     }
 
@@ -726,16 +496,14 @@ function crm_search_wp_users_for_chat_callback() {
         wp_send_json_success( array() ); // Devolver array vacío si es corto
     }
 
-    //crm_log( "Buscando usuarios WP con teléfono que coincidan con: '{$search_term}'" );
-
     // 4. Preparar WP_User_Query
     $args = array(
-        'search'         => '*' . esc_attr( $search_term ) . '*', // Buscar coincidencias parciales
-        'search_columns' => array( 'user_login', 'user_email', 'display_name' ),
+        'search'         => '*' . esc_attr( $search_term ) . '*', // El filtro usará esto
+        // 'search_columns' se elimina, el filtro lo maneja
         'number'         => 10, // Limitar resultados
         'fields'         => 'all_with_meta', // Obtener todos los datos y metadatos
         'meta_query'     => array(
-            array(
+            array( // Asegurar que tengan teléfono
                 'key'     => 'billing_phone', // Asegurar que tengan teléfono
                 'value'   => '',
                 'compare' => '!=',
@@ -743,7 +511,10 @@ function crm_search_wp_users_for_chat_callback() {
         ),
     );
 
+    // Añadir nuestro filtro personalizado ANTES de la consulta
+    add_action( 'pre_get_users', 'crm_custom_user_search_filter_for_chat' );
     $user_query = new WP_User_Query( $args );
+    remove_action( 'pre_get_users', 'crm_custom_user_search_filter_for_chat' );
     $results = array();
 
     // 5. Formatear resultados
@@ -759,6 +530,59 @@ function crm_search_wp_users_for_chat_callback() {
     wp_send_json_success( $results );
 }
 add_action( 'wp_ajax_crm_search_wp_users_for_chat', 'crm_search_wp_users_for_chat_callback' );
+
+/**
+ * Filtra la consulta de WP_User_Query para la búsqueda de chat,
+ * extendiendo la búsqueda a los campos first_name y last_name en usermeta.
+ *
+ * @param WP_User_Query $query La instancia de WP_User_Query.
+ */
+function crm_custom_user_search_filter_for_chat( $query ) {
+    // Solo aplicar este filtro si es nuestra acción AJAX específica
+    if ( !(defined('DOING_AJAX') && DOING_AJAX && isset($_REQUEST['action']) && $_REQUEST['action'] === 'crm_search_wp_users_for_chat') ) {
+        return;
+    }
+
+    global $wpdb;
+    $search_term = $query->get('search');
+
+    if ( empty( $search_term ) ) {
+        return;
+    }
+
+    // Limpiar el término de búsqueda (WP_User_Query añade '*' al principio y al final)
+    // Si el término original era '*term*', $query->get('search') será '*term*'
+    // Si el término original era 'term', $query->get('search') será '*term*'
+    // Necesitamos el 'term' puro para nuestro LIKE '%term%'
+    $cleaned_search_term = trim( $search_term, '*' );
+
+    if ( empty( $cleaned_search_term ) ) {
+        return;
+    }
+
+    $search_sql_fragment = $wpdb->prepare(
+        " AND (
+            {$wpdb->users}.user_login LIKE %s OR
+            {$wpdb->users}.user_email LIKE %s OR
+            {$wpdb->users}.display_name LIKE %s OR
+            EXISTS (
+                SELECT 1 FROM {$wpdb->usermeta} um
+                WHERE um.user_id = {$wpdb->users}.ID
+                AND (
+                    (um.meta_key = 'first_name' AND um.meta_value LIKE %s) OR
+                    (um.meta_key = 'last_name' AND um.meta_value LIKE %s)
+                )
+            )
+        )",
+        '%' . $wpdb->esc_like( $cleaned_search_term ) . '%',
+        '%' . $wpdb->esc_like( $cleaned_search_term ) . '%',
+        '%' . $wpdb->esc_like( $cleaned_search_term ) . '%',
+        '%' . $wpdb->esc_like( $cleaned_search_term ) . '%',
+        '%' . $wpdb->esc_like( $cleaned_search_term ) . '%'
+    );
+    $query->query_where .= $search_sql_fragment;
+    $query->set( 'search', '' ); // Evitar que WP_User_Query procese el 'search' original
+}
 
 // =========================================================================
 // == MANEJADORES AJAX - ENVÍO DE MENSAJES ==
@@ -1191,6 +1015,7 @@ function crm_get_contact_details_callback() {
         'first_name'        => $user_data->first_name,
         'last_name'         => $user_data->last_name,
         'role'              => !empty($user_data->roles) ? translate_user_role( $user_data->roles[0] ) : 'N/A',
+        'role_key'          => !empty($user_data->roles) ? $user_data->roles[0] : '', // Clave del rol
         'registration_date' => $registration_date,
     );
 
@@ -1269,6 +1094,7 @@ function crm_save_contact_details_callback() {
     $last_name  = isset( $_POST['last_name'] ) ? sanitize_text_field( wp_unslash( $_POST['last_name'] ) ) : '';
     $notes   = isset( $_POST['notes'] ) ? sanitize_textarea_field( wp_unslash( $_POST['notes'] ) ) : '';
 
+
     // 3. Validar datos
     if ( $user_id <= 0 ) {
         wp_send_json_error( array( 'message' => 'ID de usuario inválido.' ), 400 );
@@ -1284,6 +1110,16 @@ function crm_save_contact_details_callback() {
     if ( $existing_user && $existing_user != $user_id ) {
         wp_send_json_error( array( 'message' => 'Este correo electrónico ya está en uso por otro usuario.' ), 409 ); // 409 Conflict
     }
+
+    // --- INICIO: Manejo de Actualización de Rol ---
+    $new_role_key = isset( $_POST['role_key'] ) ? sanitize_key( $_POST['role_key'] ) : null;
+    if ( $new_role_key && current_user_can( 'promote_user', $user_id ) ) { // Verificar capacidad para promover
+        $user_to_update = get_user_by( 'ID', $user_id );
+        if ( $user_to_update && in_array( $new_role_key, array_keys( get_editable_roles() ) ) ) {
+            $user_to_update->set_role( $new_role_key );
+        }
+    }
+    // --- FIN: Manejo de Actualización de Rol ---
 
     // 4. Actualizar datos del usuario WP
     $user_data_update = array(
@@ -1345,6 +1181,37 @@ function crm_get_etiquetas_for_select_callback() {
 
 }
 add_action( 'wp_ajax_crm_get_etiquetas_for_select', 'crm_get_etiquetas_for_select_callback' );
+
+/**
+ * AJAX Handler para obtener la lista de roles de WordPress editables.
+ * Llamado desde app.js para el sidebar de detalles del contacto, en modo edición.
+ */
+function crm_get_wordpress_roles_callback() {
+    //crm_log( 'Recibida petición AJAX: crm_get_wordpress_roles' );
+
+    check_ajax_referer( 'crm_evolution_sender_nonce', '_ajax_nonce' );
+    if ( ! current_user_can( 'edit_users' ) ) { // Capacidad para editar usuarios/roles
+        //crm_log( 'Error AJAX: Permiso denegado para crm_get_wordpress_roles.', 'ERROR' );
+        wp_send_json_error( array( 'message' => 'No tienes permisos suficientes.' ), 403 );
+    }
+
+    $editable_roles = get_editable_roles();
+    $roles_for_select = array();
+
+    if ( ! empty( $editable_roles ) ) {
+        foreach ( $editable_roles as $role_key => $role_details ) {
+            $roles_for_select[] = array(
+                'key'  => $role_key,
+                'name' => translate_user_role( $role_details['name'] ), // Usar translate_user_role para el nombre
+            );
+        }
+    }
+
+    //crm_log( "Enviando " . count($roles_for_select) . " roles de WordPress para select.", 'INFO' );
+    wp_send_json_success( $roles_for_select );
+}
+add_action( 'wp_ajax_crm_get_wordpress_roles', 'crm_get_wordpress_roles_callback' );
+
 
 // =========================================================================
 // == MANEJADOR AJAX - ACTUALIZAR AVATAR DEL CONTACTO ==

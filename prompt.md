@@ -1,63 +1,98 @@
-Objetivo General: Permitir enviar mensajes de WhatsApp (texto y/o multimedia) a un cliente desde el modal de un evento en el calendario del POS, seleccionando una instancia de Evolution API gestionada por crm-evolution-sender.
+# Proyecto de Desarrollo: Mejoras y Nuevas Funcionalidades para CRM Evolution Sender
 
-Fases y Componentes Involucrados:
+## 1. Visión General del Plugin `crm-evolution-sender`
 
-1. Preparación de crm-evolution-sender:
+**CRM Evolution Sender** es un plugin de WordPress diseñado para centralizar y potenciar la comunicación vía WhatsApp mediante la integración con Evolution API. Permite la gestión de instancias, usuarios, campañas de marketing y, fundamentalmente, ofrece una interfaz de chat para la comunicación directa.
 
-Función para obtener instancias activas (crm-ajax-handlers.php):
-Modificamos crm_get_active_instances_callback() para que:
-Devuelva una lista de instancias activas formateada para un <select> (con value y text).
-Verifique el nonce 'wp_rest' para seguridad en la llamada AJAX desde pos-base.
-Función para envío externo de mensajes (crm-ajax-handlers.php):
-Creamos crm_external_send_whatsapp_message($recipient_identifier, $message_content, $target_instance_name, $media_url = null, $media_filename = null):
-Acepta un identificador de destinatario (ID de usuario WP o JID), el contenido del mensaje, el nombre de la instancia objetivo (obligatorio), y opcionalmente una URL de archivo multimedia y su nombre.
-Determina si es un mensaje de texto o multimedia.
-Obtiene el JID del destinatario.
-Llama a la API de Evolution a través de la instancia especificada.
-Si el envío es exitoso y se puede asociar a un user_id de WordPress, guarda el mensaje en el CPT crm_chat.
-2. Integración en pos-base:
+**Objetivos Actuales del Desarrollo:**
 
-HTML del Formulario Estándar (en el modal de evento del calendario - pos-page.php):
-Añadimos una estructura HTML (#crm-standard-whatsapp-form) dentro del modal del evento.
-Este formulario incluye:
-Un <select> para las instancias (#crm-standard-instance-selector).
-Un campo de texto (readonly) para el teléfono del destinatario (#crm-standard-recipient-phone).
-Un <textarea> para el mensaje (#crm-standard-message-text).
-Botones y campos para seleccionar/mostrar un archivo multimedia (#crm-standard-select-media-button, #crm-standard-media-preview, etc.).
-Un botón de envío (#crm-standard-send-button).
-Un div para feedback (#crm-standard-form-feedback).
-El formulario está oculto por defecto.
-Lógica JavaScript (pos-base/assets/app.js):
-Dentro de eventClick (cuando se abre el modal del evento):
-Se realiza una llamada AJAX a crm_get_active_instances (de crm-evolution-sender) usando el nonce posBaseParams.nonce (que es 'wp_rest').
-Si se obtienen instancias, se puebla el <select> de instancias.
-Se rellena el campo de teléfono del destinatario con la información del evento.
-Se muestra el formulario #crm-standard-whatsapp-form.
-Manejador para #crm-standard-select-media-button:
-Usa wp.media para abrir el gestor de medios de WordPress.
-Guarda la URL y nombre del archivo seleccionado.
-Manejador para #crm-standard-send-button:
-Recopila los datos del formulario (instancia, teléfono, mensaje, archivo).
-Realiza una llamada AJAX a la nueva acción pos_send_standard_whatsapp_message en pos-base.
-Muestra feedback al usuario.
-Manejador AJAX en Backend (pos-base.php y pos-api.php):
-Se registra la acción wp_ajax_pos_send_standard_whatsapp_message en pos-base.php.
-Se crea la función pos_send_standard_whatsapp_message_callback() en pos-api.php:
-Verifica el nonce 'wp_rest' y los permisos del usuario.
-Obtiene y sanitiza los datos enviados desde el frontend.
-Comprueba si la función crm_external_send_whatsapp_message() existe.
-Si existe, la llama pasándole los datos (teléfono, mensaje, instancia, media).
-Devuelve una respuesta JSON al frontend.
-Flujo de Envío:
+1.  **Mejorar la Interfaz de Chat Existente:** Implementar filtros avanzados (Todos, Favoritos, Grupos) y una gestión más robusta de contactos favoritos y entidades de grupo, incluyendo la obtención de nombres de grupo desde la API.
+2.  **Integración con Plugin `pos-base`:** Permitir el envío de mensajes de WhatsApp (texto y multimedia) directamente desde un modal de eventos del calendario del plugin `pos-base`, utilizando las instancias gestionadas por `crm-evolution-sender`.
 
-Usuario hace clic en un evento del calendario en pos-base.
-Se abre el modal. El JS de pos-base llama a crm-evolution-sender para obtener las instancias activas.
-Si hay instancias, el formulario de envío de WhatsApp se muestra en el modal, poblado con las instancias y el teléfono del cliente del evento.
-El usuario selecciona una instancia, escribe un mensaje y/o adjunta un archivo.
-El usuario hace clic en "Enviar Mensaje".
-El JS de pos-base envía los datos mediante AJAX a pos_send_standard_whatsapp_message_callback en pos-api.php.
-pos_send_standard_whatsapp_message_callback llama a crm_external_send_whatsapp_message() en crm-evolution-sender.
-crm_external_send_whatsapp_message() se comunica con la API de Evolution para enviar el mensaje.
-Si el envío es exitoso, crm_external_send_whatsapp_message() también guarda el mensaje en el CPT crm_chat.
-La respuesta (éxito/error) se propaga de vuelta al frontend de pos-base, que muestra un mensaje al usuario.
-¿Este resumen concuerda con tu entendimiento de lo que hemos hecho? Si hay algo que no esté claro o quieras repasar con más detalle, dímelo.
+## 2. Componentes y Funcionalidades Existentes Relevantes
+
+*   **Plugin `crm-evolution-sender`:**
+    *   Gestión de múltiples instancias de Evolution API (CRUD).
+    *   Administración de usuarios de WordPress (contactos).
+    *   CPT `crm_chat` para almacenar el historial de mensajes.
+    *   Interfaz de chat básica (en `crm-chat-history.php`) para visualizar conversaciones y enviar mensajes.
+    *   Manejadores AJAX en `crm-ajax-handlers.php`.
+    *   Lógica de webhooks en `crm-rest-api.php` para recibir mensajes y crear/actualizar usuarios y mensajes.
+    *   Archivos de assets: `assets/app.js` y `assets/style.css`.
+*   **Plugin `pos-base`:**
+    *   Calendario con eventos.
+    *   Modal de detalles de evento (definido en `pos-page.php`).
+    *   Lógica JavaScript en `pos-base/assets/app.js`.
+    *   Backend y API en `pos-base.php` y `pos-api.php`.
+
+## 3. Nuevas Funcionalidades y Mejoras a Implementar
+
+### A. Mejoras en la Interfaz de Chat de `crm-evolution-sender`
+
+#### A.1. Filtros de Chat ("Todos", "Favoritos", "Grupos")
+
+*   **Qué:** Añadir botones de filtro en la cabecera de la lista de chats para permitir al usuario visualizar:
+    *   **Todos:** Todas las conversaciones recientes (comportamiento actual).
+    *   **Favoritos:** Solo conversaciones con contactos marcados como favoritos.
+    *   **Grupos:** Solo conversaciones que son con entidades de grupo.
+*   **Cómo (Archivos en `crm-evolution-sender`):**
+    *   **`crm-chat-history.php`:**
+        *   Añadir el HTML para los tres botones de filtro (`<button data-filter="all">`, `<button data-filter="favorites">`, `<button data-filter="groups">`) dentro del `div.chat-list-header`.
+    *   **`assets/style.css`:**
+        *   Añadir estilos CSS para los botones de filtro, incluyendo un estado `active` para el filtro seleccionado.
+    *   **`assets/app.js`:**
+        *   Manejar el evento `click` en los botones de filtro.
+        *   Al hacer clic, actualizar la clase `active` en los botones.
+        *   Realizar una petición AJAX a `crm_get_recent_conversations_ajax` (en `crm-ajax-handlers.php`), pasando el tipo de filtro seleccionado.
+        *   Actualizar la lista de chats en la interfaz con la respuesta.
+    *   **`crm-ajax-handlers.php` (función `crm_get_recent_conversations_ajax`):**
+        *   Modificar la función para aceptar un parámetro de filtro (ej: `filter_type`).
+        *   Ajustar la `WP_Query` (o la lógica de obtención de conversaciones) según el filtro:
+            *   `all`: Sin cambios en la consulta principal.
+            *   `favorites`: Necesitará una consulta para obtener `user_id` de usuarios con `_crm_is_favorite_contact = true`, y luego obtener conversaciones de esos usuarios.
+            *   `groups`: Necesitará una consulta para obtener `user_id` de usuarios con `_crm_is_group_entity = true`, y luego obtener las "conversaciones" asociadas a estas entidades de grupo.
+
+#### A.2. Funcionalidad de "Favoritos"
+
+*   **Qué:** Permitir al usuario marcar/desmarcar contactos (usuarios WP) como favoritos.
+*   **Cómo (Archivos en `crm-evolution-sender`):**
+    *   **Datos:**
+        *   Utilizar un metadato de usuario: `_crm_is_favorite_contact` (booleano) en la tabla `wp_usermeta`.
+    *   **Interfaz (en `crm-chat-history.php`):**
+        *   En el panel de detalles del contacto (sidebar derecho), añadir un icono (ej: estrella) para marcar/desmarcar como favorito.
+        *   El estado del icono debe reflejar el estado actual del contacto.
+    *   **Lógica JavaScript (en `assets/app.js`):**
+        *   Manejar el clic en el icono de estrella.
+        *   Realizar una petición AJAX a una nueva acción para actualizar el estado de favorito.
+        *   Actualizar visualmente el icono y, opcionalmente, la lista de chats si el filtro "Favoritos" está activo.
+    *   **Lógica Backend (en `crm-ajax-handlers.php`):**
+        *   Crear una nueva función callback AJAX (ej: `crm_toggle_favorite_contact_callback`).
+        *   Recibirá el `user_id` del contacto y el nuevo estado de favorito.
+        *   Verificará nonces y permisos.
+        *   Actualizará el metadato `_crm_is_favorite_contact` para el usuario.
+        *   Devolverá una respuesta de éxito/error.
+
+#### A.3. Funcionalidad de "Grupos" (Identificación y Visualización)
+
+*   **Qué:** Asegurar que las entidades de grupo de WhatsApp se creen y gestionen correctamente como usuarios WP, y que sus nombres se obtengan de la API de Evolution.
+*   **Cómo (Archivos en `crm-evolution-sender`):**
+    *   **Datos:**
+        *   Utilizar un metadato de usuario: `_crm_is_group_entity` (booleano) en `wp_usermeta` para los usuarios WP que representan grupos.
+    *   **`crm-rest-api.php`:**
+        *   **Modificar `crm_process_single_jid()`:**
+            *   Permitir que procese JIDs terminados en `@g.us`.
+            *   Si el JID es de grupo:
+                *   Al crear un nuevo usuario WP para el grupo, establecer `_crm_is_group_entity = true`.
+                *   Generar un `user_login` (ej: `group_JIDNUM`) y un `display_name` inicial (ej: el JID del grupo).
+                *   Llamar a una nueva función (ej: `crm_update_group_user_metadata_from_api()`) para obtener el nombre real del grupo.
+            *   Si el usuario WP del grupo ya existe, llamar igualmente a `crm_update_group_user_metadata_from_api()` para asegurar que el nombre esté actualizado.
+        *   **Crear `crm_update_group_user_metadata_from_api($user_id, $group_jid, $instance_name)`:**
+            *   Esta función tomará el ID del usuario WP del grupo, su JID y el nombre de la instancia.
+            *   Hará una petición `GET` al endpoint `/group/findGroupInfos/{instanceName}` de la API de Evolution (usando la función `crm_evolution_api_request` existente).
+            *   La respuesta de la API será un array de objetos de grupo.
+            *   Buscará en el array el objeto cuyo `id` coincida con `$group_jid`.
+            *   Si se encuentra y tiene la propiedad `subject` (nombre del grupo), actualizará el `display_name` del usuario WP (`wp_update_user`).
+            *   (Opcional futuro: manejar `pictureUrl` para el avatar del grupo).
+        *   **Modificar `crm_evolution_webhook_handler_callback()`:**
+            *   Cuando se reciba un mensaje de un grupo (`event: messages.upsert`, `key.remoteJid` termina en `@g.us`):
+                *   Asegurar que se llame a `crm_process_single_jid()` con el JID del grupo (`key.remoteJid`). Esto es crucial para crear/actualizar la entidad de usuario WP para el grupo mismo y disparar la obtención de su nombre.

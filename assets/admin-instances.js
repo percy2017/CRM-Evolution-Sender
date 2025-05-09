@@ -240,11 +240,6 @@
             openQrModalForInstance(instanceName);
         });
 
-        $cardsContainer.on('click', '.btn-disconnect', function() {
-            // Lógica para desconectar (similar a delete, llamar a 'crm_disconnect_instance')
-            // ... (Implementación pendiente si es necesario) ...
-            console.warn('Funcionalidad Desconectar pendiente de implementar');
-        });
 
         $cardsContainer.on('click', '.btn-delete', function() {
             // Lógica para eliminar (usar SweetAlert para confirmar)
