@@ -5,15 +5,19 @@
 .crm-chat-history-page .crm-chat-container {
     display: flex; /* Activa Flexbox */
     border: 1px solid #ccd0d4;
-    height: calc(100vh - 100px); /* Altura ajustable (resta altura del header/footer de WP y margen superior) - Ajusta el 100px según sea necesario */
+    height: calc(100vh - 120px); /* Un poco más de espacio vertical, ajusta el 120px si es necesario */
     background-color: #f6f7f7; /* Fondo claro */
     margin-top: 20px;
-    /* overflow: hidden; */ /* <-- Prueba quitando esto del contenedor principal */
+    overflow: hidden; /* CRUCIAL: Prevenir scroll general del contenedor */
+    max-width: 100%; /* Asegurar que no se desborde del viewport */
+    box-sizing: border-box; /* Incluir padding y border en el width/height total */
 }
 
 .crm-chat-history-page .chat-list-column {
-    flex: 0 0 30%; /* No crece, no encoge, base del 30% */
-    max-width: 350px; /* Ancho máximo opcional */
+    width: 320px; /* Ancho fijo */
+    min-width: 320px; /* Ancho mínimo fijo */
+    flex-grow: 0; /* No permitir que crezca */
+    flex-shrink: 0; /* No permitir que se encoja */
     border-right: 1px solid #ccd0d4; /* Separador */
     display: flex;
     flex-direction: column; /* Apila header y lista */
@@ -22,27 +26,71 @@
 
 .crm-chat-history-page .chat-list-header {
     padding: 10px 15px;
-    border-bottom: 1px solid #ccd0d4;
+    /* border-bottom: 1px solid #ccd0d4; Eliminado, se maneja por secciones internas */
     background-color: #f0f0f1; /* Fondo ligeramente gris */
 }
 
-.crm-chat-history-page .chat-list-header h2 {
+/* Nueva barra superior en el header de la lista de chats */
+.crm-chat-history-page .chat-list-top-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding-bottom: 10px; /* Espacio antes del buscador */
+    height: 40px; /* Altura similar a WhatsApp */
+}
+
+.crm-chat-history-page .chat-list-title {
     margin: 0;
-    font-size: 1.1em;
+    font-size: 20px; /* Tamaño como WhatsApp */
+    font-weight: 500;
+    color: #111b21; /* Color oscuro como WhatsApp */
+}
+
+.crm-chat-history-page .chat-list-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px; /* Espacio entre iconos */
+}
+
+.crm-chat-history-page .button-icon {
+    background: none;
+    border: none;
+    color: #54656f; /* Color de icono gris oscuro de WhatsApp */
+    padding: 8px;
+    cursor: pointer;
+    border-radius: 50%;
+    line-height: 1;
+    display: flex; /* Para centrar el dashicon si es necesario */
+    align-items: center;
+    justify-content: center;
+}
+
+.crm-chat-history-page .button-icon:hover {
+    background-color: rgba(0, 0, 0, 0.05); /* Hover sutil */
+    color: #3b4a54;
+}
+
+.crm-chat-history-page .button-icon .dashicons {
+    font-size: 22px; /* Tamaño de los iconos (WhatsApp usa 24px) */
+    width: 22px;
+    height: 22px;
+    vertical-align: middle; /* Aunque flex lo centra */
 }
 
 /* --- Estilos Buscador de Chats --- */
 .crm-chat-history-page .chat-search-container {
-    padding: 10px 0; /* Espacio arriba/abajo del buscador */
+    padding-bottom: 10px; /* Espacio debajo del buscador, antes de los filtros */
+    /* background-color: #f0f0f1; /* Mismo fondo que el header para continuidad */
 }
 
 .crm-chat-history-page #chat-search-input {
     width: 100%;
-    padding: 8px 10px;
-    border: 1px solid #ddd;
-    border-radius: 20px; /* Bordes redondeados */
+    padding: 7px 12px; /* Padding similar a WhatsApp */
+    border: none; /* Sin borde */
+    border-radius: 8px; /* Bordes redondeados como WhatsApp */
     box-sizing: border-box;
-    font-size: 0.9em;
+    font-size: 14px; /* Tamaño de fuente WhatsApp */
+    background-color: #fff; /* Fondo blanco para el input */
 }
 /* --- Estilos Filtros de Chat --- */
 .crm-chat-history-page .chat-list-filters {
@@ -76,6 +124,59 @@
     flex-grow: 1; /* Ocupa el espacio restante */
     overflow-y: auto; /* Scroll si la lista es larga */
     padding: 10px 0; /* Espacio arriba/abajo */
+}
+
+/* Estilos para el menú desplegable de instancias */
+.crm-chat-history-page .dropdown-menu-container {
+    position: relative; /* Para posicionar el menú desplegable */
+}
+
+.crm-chat-history-page .dropdown-menu {
+    position: absolute;
+    top: calc(100% + 5px); /* Debajo del botón, con un pequeño espacio */
+    right: 0; /* Alineado a la derecha del botón */
+    background-color: #fff;
+    /* border: 1px solid #ccc; */ /* Sin borde, confiamos en el shadow */
+    border-radius: 3px; /* Bordes más sutiles */
+    box-shadow: 0 2px 5px rgba(0,0,0,0.1), 0 4px 10px rgba(0,0,0,0.08); /* Sombra como WhatsApp */
+    z-index: 1000; /* Asegurar que esté por encima de otros elementos */
+    min-width: 200px; /* Ancho mínimo del menú */
+    padding: 8px 0; /* Espacio vertical dentro del menú */
+}
+
+.crm-chat-history-page .dropdown-menu .instance-filter-item {
+    display: block;
+    padding: 10px 20px; /* Más padding para mejor clicabilidad */
+    text-decoration: none;
+    color: #333;
+    font-size: 14px; /* Tamaño de fuente de los items */
+    white-space: nowrap;
+}
+.crm-chat-history-page .dropdown-menu .instance-filter-item:hover,
+.crm-chat-history-page .dropdown-menu .instance-filter-item.active {
+    background-color: #f0f0f0; /* Hover/active más sutil */
+    color: #111b21; /* Color de texto más oscuro en hover/active */
+}
+
+.crm-chat-history-page .dropdown-menu .instance-filter-item .status-dot {
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    margin-right: 7px;
+    vertical-align: middle;
+    position: relative; /* Para posible animación o tooltip futuro */
+    top: -1px; /* Ajuste vertical fino */
+}
+
+.crm-chat-history-page .dropdown-menu .instance-filter-item .status-dot.open {
+    background-color: #4CAF50; /* Verde para conectado */
+}
+.crm-chat-history-page .dropdown-menu .instance-filter-item .status-dot.close {
+    background-color: #F44336; /* Rojo para desconectado */
+}
+.crm-chat-history-page .dropdown-menu .instance-filter-item .status-dot.unknown {
+    background-color: #9E9E9E; /* Gris para desconocido */
 }
 
 /* --- Estilos Lista de Chats --- */
@@ -175,9 +276,10 @@
    .crm-chat-history-page .chat-view-column { /* Contenedor de mensajes e input */
     flex-grow: 1; /* Ocupa el espacio restante */
     display: flex;
-    flex-direction: column; /* Apila mensajes arriba, input abajo */
+    flex-direction: column; /* Apila mensajes arriba, input abajo */    
     background-color: #e5ddd5; /* Fondo tipo WhatsApp */
-    min-height: 0;
+    min-height: 0; /* Necesario para flexbox en algunos navegadores */
+    overflow: hidden; /* Para manejar el scroll interno del área de mensajes y evitar doble scroll */
 }
 
 .crm-chat-history-page .chat-messages-area { /* Área donde van las burbujas */
@@ -259,8 +361,8 @@
 }
 
 .crm-chat-history-page .message-bubble {
-    max-width: 70%; /* Ancho máximo de la burbuja */
-    padding: 8px 12px;
+    max-width: 50%; /* Ancho máximo de la burbuja - Reducido */
+    padding: 3px 5px; /* Padding reducido */
     border-radius: 8px;
     position: relative; /* Para posicionar la hora */
     box-shadow: 0 1px 1px rgba(0,0,0,0.1);
@@ -447,7 +549,10 @@
    ========================================================================== */
 
 .crm-chat-history-page .contact-details-column {
-    flex: 0 0 300px; /* No crece, no encoge, base de 300px */
+    width: 320px; /* Ancho fijo */
+    min-width: 320px; /* Ancho mínimo fijo */
+    flex-grow: 0; /* No permitir que crezca */
+    flex-shrink: 0; /* No permitir que se encoja */
     border-left: 1px solid #ccd0d4; /* Separador izquierdo */
     background-color: #fff; /* Fondo blanco */
     display: flex; /* Usa flex para header y content */
@@ -627,4 +732,69 @@
     font-size: 24px;
     width: 24px;
     height: 24px;
+}
+
+/* Estilos para la cabecera del chat activo */
+#active-chat-header {
+    display: flex; /* Para alinear avatar y nombre horizontalmente */
+    align-items: center; /* Para centrar verticalmente los elementos */
+    padding: 10px 15px;
+    height: 62px; /* Altura similar a WhatsApp Web */
+    border-bottom: 1px solid #e9edef; /* Color de borde sutil */
+    background-color: #f0f2f5; /* Color de fondo similar a WhatsApp */
+    cursor: pointer;
+    position: sticky; /* Para que se mantenga fija arriba */
+    top: 0;
+    z-index: 1001; /* Asegurar que esté sobre los mensajes y otros elementos */
+    box-sizing: border-box;
+    /* display: none; /* Se controla por JS, no es necesario aquí si se quita del inline */
+}
+
+#active-chat-header:hover {
+    background-color: #e9edef; /* Un ligero cambio al pasar el mouse */
+}
+
+.chat-header-avatar {
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    margin-right: 15px;
+    object-fit: cover; /* Para que las imágenes de avatar se vean bien */
+}
+
+.chat-header-name {
+    font-size: 16px;
+    font-weight: 500; /* Un poco menos bold que 'bold' */
+    color: #111b21; /* Color oscuro para el nombre */
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap; /* Para evitar que nombres largos rompan el layout */
+}
+
+
+/* Estilos para la cabecera principal del sidebar de detalles del contacto */
+.crm-chat-history-page .contact-details-main-header {
+    height: 62px; /* Misma altura que #active-chat-header y #chat-list-header (asumiendo que chat-list-header también es 62px) */
+    display: flex;
+    align-items: center; /* Centra verticalmente el título y el botón X */
+    justify-content: space-between; /* Título a la izquierda, botón X a la derecha */
+    padding: 0 15px; /* Ajusta el padding horizontal si es necesario, padding vertical ya no es necesario por height y align-items */
+    box-sizing: border-box; /* Para que el padding no incremente la altura */
+    /* background-color: #f0f0f1; /* Mantenemos el fondo que ya tenía .contact-details-header */
+    /* border-bottom: 1px solid #ccd0d4; /* Mantenemos el borde que ya tenía .contact-details-header */
+}
+
+/* Ajustes para el título dentro de la nueva cabecera */
+.crm-chat-history-page .contact-details-main-header h3 {
+    margin: 0; /* Quitar márgenes por defecto del h3 */
+    font-size: 16px; /* Tamaño similar al .chat-header-name */
+    font-weight: 500; /* Peso similar al .chat-header-name */
+    color: #111b21; /* Color similar al .chat-header-name */
+}
+
+/* Ajustes para el botón de cerrar dentro de la nueva cabecera */
+.crm-chat-history-page .contact-details-main-header #close-contact-details {
+    position: static; /* Quitar posicionamiento absoluto previo */
+    transform: none; /* Quitar transform previo */
+    /* Los estilos de .button-icon ya deberían darle buena apariencia */
 }

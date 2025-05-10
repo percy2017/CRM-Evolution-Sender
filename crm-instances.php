@@ -1,10 +1,8 @@
 <?php
-/**
- * Muestra la página principal de gestión de instancias (vista de tarjetas)
- * y contiene los manejadores AJAX específicos para esta página.
- *
- * @package CRM Evolution Sender
- */
+// Incluir archivos necesarios para media_sideload_image
+require_once(ABSPATH . 'wp-admin/includes/media.php');
+require_once(ABSPATH . 'wp-admin/includes/file.php');
+require_once(ABSPATH . 'wp-admin/includes/image.php');
 
 // Si este archivo es llamado directamente, abortar.
 if ( ! defined( 'WPINC' ) ) {
@@ -49,7 +47,7 @@ function crm_instances_api_request( $method, $endpoint, $body = [], $instance_ap
             'Content-Type' => 'application/json',
             'apikey'       => $api_key_to_use,
         ),
-        'timeout' => 30,
+        'timeout' => 90,
         'redirection' => 5,
         'httpversion' => '1.1',
         'sslverify' => false, // Considera cambiar esto en producción
@@ -171,7 +169,14 @@ function crm_render_instances_page_html() {
                         <span class="dashicons dashicons-camera"></span>
                     </button>
                 <# } #>
-                 <button class="button button-secondary btn-sync-contacts" title="<?php esc_attr_e( 'Sincronizar Contactos', CRM_EVOLUTION_SENDER_TEXT_DOMAIN ); ?>">
+                <button class="button button-secondary btn-toggle-groups" data-groups-ignore="{{ data.groupsIgnore }}" title="<?php esc_attr_e( 'Activar/Desactivar Ignorar Grupos', CRM_EVOLUTION_SENDER_TEXT_DOMAIN ); ?>">
+                    <# if ( data.settings && data.settings.groups_ignore ) { #>
+                        <span class="dashicons dashicons-groups" style="color:red;" title="<?php esc_attr_e( 'Grupos Ignorados', CRM_EVOLUTION_SENDER_TEXT_DOMAIN ); ?>"></span>
+                    <# } else { #>
+                        <span class="dashicons dashicons-networking" style="color:green;" title="<?php esc_attr_e( 'Procesando Grupos', CRM_EVOLUTION_SENDER_TEXT_DOMAIN ); ?>"></span>
+                    <# } #>
+                </button>
+                <button class="button button-secondary btn-sync-contacts" title="<?php esc_attr_e( 'Sincronizar Contactos', CRM_EVOLUTION_SENDER_TEXT_DOMAIN ); ?>">
                     <span class="dashicons dashicons-admin-users"></span>
                 </button>
                 <button class="button button-danger btn-delete" title="<?php esc_attr_e( 'Eliminar Instancia', CRM_EVOLUTION_SENDER_TEXT_DOMAIN ); ?>">
@@ -209,6 +214,7 @@ function crm_get_instances_cards_callback() {
         foreach ( $api_response as $instance ) {
             $profile_pic_url = isset($instance['instance']['profilePictureUrl']) ? $instance['instance']['profilePictureUrl'] : null;
             $instances_data[] = array(
+                'settings'      => isset($instance['instance']['settings']) && is_array($instance['instance']['settings']) ? $instance['instance']['settings'] : array(),
                 'instance_name' => isset($instance['instance']['instanceName']) ? $instance['instance']['instanceName'] : 'N/D',
                 'status'        => isset($instance['instance']['status']) ? $instance['instance']['status'] : 'unknown',
                 'api_key'       => isset($instance['instance']['apiKey']) ? $instance['instance']['apiKey'] : null,
@@ -318,10 +324,10 @@ function crm_get_instance_qr_cards_callback() {
 }
 add_action( 'wp_ajax_crm_get_instance_qr_cards', 'crm_get_instance_qr_cards_callback' );
 
-    /**
-     * AJAX Handler NUEVO para eliminar una instancia (llamado por admin-instances.js).
-     * Intenta desconectar primero y luego elimina.
-    */
+/**
+ * AJAX Handler NUEVO para eliminar una instancia (llamado por admin-instances.js).
+ * Intenta desconectar primero y luego elimina.
+*/
 function crm_delete_instance_cards_callback() {
     error_log( 'Recibida petición AJAX: crm_delete_instance_cards (desde crm-instances.php)' );
     check_ajax_referer( 'crm_evolution_sender_nonce', '_ajax_nonce' );
@@ -371,12 +377,6 @@ add_action( 'wp_ajax_crm_delete_instance_cards', 'crm_delete_instance_cards_call
 
 /**
  * Procesa los datos enviados por el Heartbeat desde la página de instancias
- * y devuelve si hay actualizaciones de estado o QR.
- *
- * @param array $response La respuesta del Heartbeat a modificar.
- * @param array $data     Los datos enviados desde el cliente.
- * @param string $screen_id El ID de la pantalla actual.
- * @return array La respuesta modificada.
  */
 function crm_handle_instance_heartbeat_request( $response, $data, $screen_id ) {
     error_log("[Heartbeat PHP - ENTRY] Función llamada. Screen ID: '{$screen_id}'. Datos recibidos: " . print_r($data, true));
@@ -415,8 +415,6 @@ function crm_handle_instance_heartbeat_request( $response, $data, $screen_id ) {
 
     return $response;
 }
-// *** NUEVO LOG: Verificar si el add_filter se está ejecutando ***
-// error_log("[Heartbeat PHP - INIT] Añadiendo filtro 'heartbeat_received' para 'crm_handle_instance_heartbeat_request'.");
 add_filter( 'heartbeat_received', 'crm_handle_instance_heartbeat_request', 10, 3 );
 
 // =========================================================================
@@ -620,9 +618,9 @@ function crm_instances_process_single_jid($jid, $instanceName, $pushNameToUse = 
         update_user_meta($user_id, '_crm_is_group', false);
         update_user_meta($user_id, '_crm_is_favorite', false);
         update_user_meta($user_id, '_crm_instance_name', $instanceName);
-        // update_user_meta($user_id, '_crm_isBusiness', isset($profile_response['isBusiness']) ? (bool)$profile_response['isBusiness'] : false);
-        // update_user_meta($user_id, '_crm_description', $profile_response['description'] ?? null)
-        // update_user_meta($user_id, '_crm_website', $profile_response['website'] ?? null)
+        update_user_meta($user_id, '_crm_isBusiness', isset($profile_response['isBusiness']) ? (bool)$profile_response['isBusiness'] : false);
+        update_user_meta($user_id, '_crm_description', $profile_response['description'] ?? null);
+        update_user_meta($user_id, '_crm_website', $profile_response['website'] ?? null);
         update_user_meta($user_id, 'billing_phone', $number);
         update_user_meta($user_id, 'billing_first_name', $first_name);
         update_user_meta($user_id, 'billing_last_name', $last_name);
@@ -637,11 +635,6 @@ function crm_instances_process_single_jid($jid, $instanceName, $pushNameToUse = 
         // *** Descargar y guardar avatar INMEDIATAMENTE si hay URL ***
         if (!empty($avatar_url)) {
             error_log("[crm_instances_process_single_jid] Nuevo usuario creado con User ID: {$user_id}. Intentando descargar avatar desde: {$avatar_url}");
-
-            // Incluir archivos necesarios para media_sideload_image
-            require_once(ABSPATH . 'wp-admin/includes/media.php');
-            require_once(ABSPATH . 'wp-admin/includes/file.php');
-            require_once(ABSPATH . 'wp-admin/includes/image.php');
 
             // Descargar la imagen, añadirla a la biblioteca de medios y obtener su ID
             // El tercer argumento es la descripción (usamos display_name), 'id' devuelve el ID del adjunto
@@ -733,5 +726,96 @@ function crm_instances_download_avatar_callback($user_id, $avatar_url) {
 }
 // Registrar la acción del nuevo Cron simple
 add_action('crm_instances_download_avatar', 'crm_instances_download_avatar_callback', 10, 2);
+
+
+/**
+ * AJAX Handler para actualizar la configuración de una instancia de Evolution API.
+ * Actualmente enfocado en 'groups_ignore', pero diseñado para ser extensible.
+ */
+function crm_update_instance_settings_callback() {
+    error_log( 'Recibida petición AJAX: crm_update_instance_settings' );
+
+    // 1. Verificar Nonce y Permisos
+    check_ajax_referer( 'crm_evolution_sender_nonce', '_ajax_nonce' );
+    if ( ! current_user_can( 'manage_options' ) ) {
+        wp_send_json_error( array( 'message' => 'No tienes permisos suficientes.' ), 403 );
+    }
+
+    // 2. Obtener y sanitizar datos
+    $instance_name = isset( $_POST['instance_name'] ) ? sanitize_key( $_POST['instance_name'] ) : '';
+    
+    // Por ahora, solo manejamos 'groups_ignore' explícitamente desde el frontend.
+    // Si en el futuro se envían más settings, se podrían recibir como un array.
+    $new_groups_ignore_status_raw = isset( $_POST['new_groups_ignore_status'] ) ? $_POST['new_groups_ignore_status'] : null;
+
+    if ( empty( $instance_name ) ) {
+        wp_send_json_error( array( 'message' => 'Nombre de instancia no proporcionado.' ), 400 );
+    }
+
+    // Si no se envía 'new_groups_ignore_status', no hay nada que hacer para esta implementación específica.
+    if ($new_groups_ignore_status_raw === null) {
+        wp_send_json_error( array( 'message' => 'No se especificó la configuración a cambiar.' ), 400 );
+    }
+    
+    $new_groups_ignore_status = filter_var( $new_groups_ignore_status_raw, FILTER_VALIDATE_BOOLEAN );
+
+    error_log( "Intentando cambiar configuración para instancia '{$instance_name}'. groups_ignore a: " . ($new_groups_ignore_status ? 'true' : 'false') );
+
+    // 3. Obtener la configuración actual de la instancia
+    $all_instances_response = crm_instances_api_request( 'GET', '/instance/fetchInstances' );
+    $current_settings = null;
+
+    if ( !is_wp_error( $all_instances_response ) && is_array( $all_instances_response ) ) {
+        foreach ( $all_instances_response as $instance_data ) {
+            if ( isset( $instance_data['instance']['instanceName'] ) && $instance_data['instance']['instanceName'] === $instance_name ) {
+                if ( isset( $instance_data['instance']['settings'] ) && is_array( $instance_data['instance']['settings'] ) ) {
+                    $current_settings = $instance_data['instance']['settings'];
+                    error_log( "Configuración actual encontrada para '{$instance_name}': " . print_r($current_settings, true) );
+                }
+                break;
+            }
+        }
+    }
+
+    // Si no se encontraron settings, usar valores por defecto para asegurar que la API reciba un objeto completo.
+    if ( $current_settings === null ) {
+        error_log( "No se encontró configuración actual para '{$instance_name}'. Usando valores por defecto." );
+        // Estos son los valores por defecto que habíamos discutido.
+        // La API /settings/set espera el objeto completo.
+        $current_settings = array(
+            "reject_call"       => true,
+            "msg_call"          => "Esta línea no está disponible en este momento.",
+            "groups_ignore"     => false, // Este valor se sobrescribirá con el nuevo estado.
+            "always_online"     => true,
+            "read_messages"     => true,
+            "read_status"       => true,
+            "sync_full_history" => true
+            // Añadir otros settings que la API espere si es necesario.
+        );
+    }
+
+    // 4. Actualizar el valor específico (groups_ignore en este caso)
+    // Si en el futuro recibes un array de settings a actualizar, aquí harías un array_merge o similar.
+    $current_settings['groups_ignore'] = $new_groups_ignore_status;
+
+    // 5. Enviar la configuración completa y actualizada a la API
+    $set_settings_endpoint = "/settings/set/{$instance_name}";
+    $api_response = crm_instances_api_request( 'POST', $set_settings_endpoint, $current_settings );
+
+    if ( is_wp_error( $api_response ) ) {
+        error_log( "Error API al actualizar settings para '{$instance_name}': " . $api_response->get_error_message() );
+        wp_send_json_error( array( 'message' => 'Error API: ' . $api_response->get_error_message() ) );
+    } else {
+        // La respuesta de /settings/set puede variar, a veces es solo un mensaje, a veces el objeto de settings.
+        // Lo importante es que la llamada fue exitosa (código 2xx).
+        error_log( "Configuración actualizada con éxito para '{$instance_name}'. Respuesta API: " . print_r($api_response, true) );
+        wp_send_json_success( array( 
+            'message' => 'Configuración de instancia actualizada correctamente.', 
+            'new_status_groups_ignore' => $new_groups_ignore_status // Devolver el estado aplicado para groups_ignore
+        ) );
+    }
+}
+// Cambiamos el nombre de la acción para reflejar que puede actualizar más settings.
+add_action( 'wp_ajax_crm_update_instance_settings', 'crm_update_instance_settings_callback' );
 
 ?>

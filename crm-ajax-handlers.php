@@ -1,7 +1,106 @@
 <?php
+require_once(ABSPATH . 'wp-admin/includes/media.php');
+require_once(ABSPATH . 'wp-admin/includes/file.php');
+require_once(ABSPATH . 'wp-admin/includes/image.php');
+
+/**
+ * AJAX Handler para obtener instancias activas (conectadas o esperando QR) para selects.
+*/
+function crm_get_active_instances_callback() {
+   error_log( 'Recibida petición AJAX: crm_get_active_instances' );
+
+   // 1. Seguridad: Verificar Nonce y Permisos.
+   // El nonce debe ser generado con la acción 'wp_rest' y enviado como 'security' desde el frontend.
+   check_ajax_referer( 'wp_rest', 'security' );
+
+   if ( ! current_user_can( 'manage_options' ) ) {
+       wp_send_json_error( array( 'message' => __( 'Permiso denegado.', CRM_EVOLUTION_SENDER_TEXT_DOMAIN ) ), 403 );
+   }
+
+   $api_response = crm_evolution_api_request( 'GET', '/instance/fetchInstances' );
+
+   if ( is_wp_error( $api_response ) ) {
+       wp_send_json_error( array( 'message' => 'Error API: ' . $api_response->get_error_message() ) );
+   } elseif ( is_array( $api_response ) ) {
+       $active_instances = array();
+       foreach ( $api_response as $instance ) {
+           $status = isset($instance['instance']['status']) ? $instance['instance']['status'] : 'unknown';
+           $instance_name_from_api = isset($instance['instance']['instanceName']) ? $instance['instance']['instanceName'] : null;
+
+           // Considerar activas las que están conectadas o esperando QR
+           // Añadimos 'open' como estado conectado también.
+           if ( $instance_name_from_api && in_array($status, ['open', 'connected', 'connection', 'qrcode', 'connecting']) ) {
+                // Formatear el texto del estado para ser más legible
+                $status_text = ucfirst($status);
+                if ($status === 'qrcode') $status_text = 'Esperando QR';
+                if ($status === 'connection' || $status === 'connected') $status_text = 'Conectada';
+                if ($status === 'connecting') $status_text = 'Conectando';
+
+                $active_instances[] = array(
+                   'value' => $instance_name_from_api,
+                   'text'  => $instance_name_from_api . ' (' . $status_text . ')',
+                );
+           }
+       }
+       wp_send_json_success( $active_instances );
+   } else {
+       wp_send_json_error( array( 'message' => 'Respuesta inesperada de la API.' ) );
+   }
+}
+add_action( 'wp_ajax_crm_get_active_instances', 'crm_get_active_instances_callback' );
+
 // =========================================================================
 // == MANEJADORES AJAX (AJAX HANDLERS) ==
 // =========================================================================
+
+/**
+ * Formatea el texto de un mensaje de chat a HTML.
+ * Convierte marcadores de negrita, cursiva, tachado y saltos de línea.
+ *
+ * @param string|null $text El texto a formatear.
+ * @return string El texto formateado como HTML.
+ */
+function crm_format_chat_message_text_to_html( $text ) {
+    if ( empty( $text ) ) {
+        return '';
+    }
+
+    // 1. Escapar HTML para seguridad, excepto para nuestras etiquetas permitidas después.
+    // Los reemplazos de abajo generarán HTML seguro.
+    $text = esc_html( $text );
+
+    // 2. Convertir marcadores a HTML
+    // Negrita: *texto* -> <strong>texto</strong>
+    $text = preg_replace( '/\*(.*?)\*/s', '<strong>$1</strong>', $text );
+    // Cursiva: _texto_ -> <em>texto</em>
+    $text = preg_replace( '/_(.*?)_/s', '<em>$1</em>', $text );
+    // Tachado: ~texto~ -> <s>texto</s>
+    $text = preg_replace( '/~(.*?)~/s', '<s>$1</s>', $text );
+
+    // 3. Convertir URLs a enlaces clickeables
+    // Expresión regular para encontrar URLs (http, https, www)
+    // Se asegura de no estar dentro de un atributo href o después de un >
+    $url_pattern = '#(?<!href=["\'])(?<!">)(?<!\w)(https?://[^\s<>"\'()]+|www\.[^\s<>"\'()]+)#i';
+
+    $text = preg_replace_callback( $url_pattern, function( $matches ) {
+        $url_original_escaped = $matches[0]; // Ya está escapada por esc_html()
+        $url_for_href = html_entity_decode( $url_original_escaped ); // Decodificar para el href
+
+        // Añadir http:// a las URLs que empiezan con www. para el href
+        if ( stripos( $url_for_href, 'www.' ) === 0 ) {
+            $url_for_href = 'http://' . $url_for_href;
+        }
+
+        // Crear el enlace
+        return '<a href="' . esc_url( $url_for_href ) . '" target="_blank" rel="noopener noreferrer">' . $url_original_escaped . '</a>';
+    }, $text );
+
+
+    // 4. Convertir saltos de línea a <br>
+    $text = nl2br( $text );
+
+    return $text;
+}
 
 /**
  * Función auxiliar para realizar peticiones a la API Evolution.
@@ -195,23 +294,20 @@ function crm_get_recent_conversations_ajax() {
     check_ajax_referer( 'crm_evolution_sender_nonce', '_ajax_nonce' );
     // Usar 'edit_posts' ya que es la capacidad que dimos al menú de chats
     if ( ! current_user_can( 'edit_posts' ) ) {
-        //crm_log( 'Error AJAX: Permiso denegado para crm_get_recent_conversations.', 'ERROR' );
         wp_send_json_error( array( 'message' => 'No tienes permisos suficientes.' ), 403 );
     }
 
     // 2. Obtener los últimos mensajes de chat
     $args = array(
         'post_type'      => 'crm_chat',
-        'posts_per_page' => 200, // Limitar inicialmente para rendimiento, ajustar si es necesario
-        'orderby'        => 'date', // Ordenar por fecha de creación del post (que se basa en timestamp_wa)
+        'posts_per_page' => -1,
+        'orderby'        => 'date',
         'order'          => 'DESC',
         'meta_query'     => array(
-            // Asegurarnos de que solo consideramos chats asociados a un usuario WP
-            // Opcional: podríamos manejar chats sin user_id (grupos?) más adelante
             array(
                 'key'     => '_crm_contact_user_id',
                 'value'   => 0,
-                'compare' => '>', // Solo IDs mayores que 0
+                'compare' => '>',
                 'type'    => 'NUMERIC',
             ),
         ),
@@ -239,12 +335,12 @@ function crm_get_recent_conversations_ajax() {
                     $last_message_text = get_the_content();
                     $media_caption = get_post_meta( $post_id, '_crm_media_caption', true );
                     $message_type = get_post_meta( $post_id, '_crm_message_type', true );
-                    $instance_name = get_post_meta( $post_id, '_crm_instance_name', true ); // <-- Obtener nombre de instancia
+                    $instance_name = get_post_meta( $post_id, '_crm_instance_name', true );
 
                     // Snippet: Usar caption si es media, sino el texto. Añadir prefijo si es media.
                     $snippet = '';
                     if ( in_array($message_type, ['image', 'video', 'audio', 'document', 'file']) ) {
-                        $snippet = '[' . ucfirst($message_type) . '] '; // Ej: [Image]
+                        $snippet = '[' . ucfirst($message_type) . '] ';
                         $snippet .= $media_caption ?: '';
                     } else {
                         $snippet = $last_message_text;
@@ -253,10 +349,10 @@ function crm_get_recent_conversations_ajax() {
                     $conversations[] = array(
                         'user_id'      => $contact_user_id,
                         'display_name' => $user_data->display_name,
-                        'avatar_url'   => get_avatar_url( $contact_user_id, ['size' => 96] ), // Obtener URL del avatar
-                        'last_message_snippet' => wp_trim_words( $snippet, 10, '...' ), // Cortar snippet largo
+                        'avatar_url'   => get_avatar_url( $contact_user_id, ['size' => 106] ),
+                        'last_message_snippet' => wp_trim_words( $snippet, 10, '...' ),
                         'last_message_timestamp' => (int) get_post_meta( $post_id, '_crm_timestamp_wa', true ),
-                        'instance_name' => $instance_name ?: 'N/D', // <-- Añadir al array de respuesta
+                        'instance_name' => $instance_name ?: 'N/D',
                     );
                 }
             }
@@ -321,19 +417,20 @@ function crm_get_conversation_messages_ajax() {
             $query->the_post();
             $post_id = get_the_ID();
             $attachment_id = get_post_meta( $post_id, '_crm_media_attachment_id', true );
-            $message_content = get_the_content(); // Obtener contenido
+            $raw_message_content = get_the_content();
+            $raw_media_caption = get_post_meta( $post_id, '_crm_media_caption', true );
             $is_outgoing = (bool) get_post_meta( $post_id, '_crm_is_outgoing', true );
             $participant_pushname = null;
             if ($is_group_chat && !$is_outgoing) {
                 $participant_pushname = get_post_meta( $post_id, '_crm_pushName', true );
             }
             $messages[] = array(
-                'id'            => $post_id,
-                'text'          => $message_content, // Usar variable
-                'timestamp'     => (int) get_post_meta( $post_id, '_crm_timestamp_wa', true ),
-                'is_outgoing'   => (bool) get_post_meta( $post_id, '_crm_is_outgoing', true ),
-                'type'          => get_post_meta( $post_id, '_crm_message_type', true ),
-                'caption'       => get_post_meta( $post_id, '_crm_media_caption', true ), // Caption específico
+                'id'            => $post_id, // ID del post del mensaje
+                'text'          => crm_format_chat_message_text_to_html( $raw_message_content ),
+                'timestamp'     => (int) get_post_meta( $post_id, '_crm_timestamp_wa', true ), // Timestamp original de WA
+                'is_outgoing'   => $is_outgoing, // Booleano
+                'type'          => get_post_meta( $post_id, '_crm_message_type', true ), // 'text', 'image', 'video', etc.
+                'caption'       => crm_format_chat_message_text_to_html( $raw_media_caption ), // Caption para multimedia
                 'attachment_id' => $attachment_id ? (int) $attachment_id : null,
                 'attachment_url'=> $attachment_id ? wp_get_attachment_url( $attachment_id ) : null, // URL del adjunto
                 'participant_pushname' => $participant_pushname,
@@ -411,21 +508,23 @@ function crm_handle_heartbeat_request( $response, $data, $screen_id ) {
                 while ( $query_open_chat->have_posts() ) {
                     $query_open_chat->the_post();
                     $post_id = get_the_ID();
+                    $raw_message_content_hb = get_the_content();
+                    $raw_media_caption_hb = get_post_meta( $post_id, '_crm_media_caption', true );
                     $attachment_id = get_post_meta( $post_id, '_crm_media_attachment_id', true );
                     $is_outgoing_message = (bool) get_post_meta( $post_id, '_crm_is_outgoing', true );
                     $participant_pushname_hb = null;
-
+                    
                     if ($is_open_chat_group && !$is_outgoing_message) {
                         $participant_pushname_hb = get_post_meta( $post_id, '_crm_pushName', true );
                     }
                     // Formatear igual que en crm_get_conversation_messages_ajax
                     $new_messages_for_open_chat[] = array(
                         'id'            => $post_id,
-                        'text'          => get_the_content(),
+                        'text'          => crm_format_chat_message_text_to_html( $raw_message_content_hb ),
                         'timestamp'     => (int) get_post_meta( $post_id, '_crm_timestamp_wa', true ),
                         'is_outgoing'   => $is_outgoing_message,
                         'type'          => get_post_meta( $post_id, '_crm_message_type', true ),
-                        'caption'       => get_post_meta( $post_id, '_crm_media_caption', true ),
+                        'caption'       => crm_format_chat_message_text_to_html( $raw_media_caption_hb ),
                         'attachment_id' => $attachment_id ? (int) $attachment_id : null,
                         'attachment_url'=> $attachment_id ? wp_get_attachment_url( $attachment_id ) : null,
                         'participant_pushname' => $participant_pushname_hb,
@@ -511,10 +610,8 @@ function crm_search_wp_users_for_chat_callback() {
         ),
     );
 
-    // Añadir nuestro filtro personalizado ANTES de la consulta
-    add_action( 'pre_get_users', 'crm_custom_user_search_filter_for_chat' );
+
     $user_query = new WP_User_Query( $args );
-    remove_action( 'pre_get_users', 'crm_custom_user_search_filter_for_chat' );
     $results = array();
 
     // 5. Formatear resultados
@@ -526,63 +623,9 @@ function crm_search_wp_users_for_chat_callback() {
         );
     }
 
-    //crm_log( "Encontrados " . count($results) . " usuarios WP con teléfono para '{$search_term}'.", 'INFO' );
     wp_send_json_success( $results );
 }
 add_action( 'wp_ajax_crm_search_wp_users_for_chat', 'crm_search_wp_users_for_chat_callback' );
-
-/**
- * Filtra la consulta de WP_User_Query para la búsqueda de chat,
- * extendiendo la búsqueda a los campos first_name y last_name en usermeta.
- *
- * @param WP_User_Query $query La instancia de WP_User_Query.
- */
-function crm_custom_user_search_filter_for_chat( $query ) {
-    // Solo aplicar este filtro si es nuestra acción AJAX específica
-    if ( !(defined('DOING_AJAX') && DOING_AJAX && isset($_REQUEST['action']) && $_REQUEST['action'] === 'crm_search_wp_users_for_chat') ) {
-        return;
-    }
-
-    global $wpdb;
-    $search_term = $query->get('search');
-
-    if ( empty( $search_term ) ) {
-        return;
-    }
-
-    // Limpiar el término de búsqueda (WP_User_Query añade '*' al principio y al final)
-    // Si el término original era '*term*', $query->get('search') será '*term*'
-    // Si el término original era 'term', $query->get('search') será '*term*'
-    // Necesitamos el 'term' puro para nuestro LIKE '%term%'
-    $cleaned_search_term = trim( $search_term, '*' );
-
-    if ( empty( $cleaned_search_term ) ) {
-        return;
-    }
-
-    $search_sql_fragment = $wpdb->prepare(
-        " AND (
-            {$wpdb->users}.user_login LIKE %s OR
-            {$wpdb->users}.user_email LIKE %s OR
-            {$wpdb->users}.display_name LIKE %s OR
-            EXISTS (
-                SELECT 1 FROM {$wpdb->usermeta} um
-                WHERE um.user_id = {$wpdb->users}.ID
-                AND (
-                    (um.meta_key = 'first_name' AND um.meta_value LIKE %s) OR
-                    (um.meta_key = 'last_name' AND um.meta_value LIKE %s)
-                )
-            )
-        )",
-        '%' . $wpdb->esc_like( $cleaned_search_term ) . '%',
-        '%' . $wpdb->esc_like( $cleaned_search_term ) . '%',
-        '%' . $wpdb->esc_like( $cleaned_search_term ) . '%',
-        '%' . $wpdb->esc_like( $cleaned_search_term ) . '%',
-        '%' . $wpdb->esc_like( $cleaned_search_term ) . '%'
-    );
-    $query->query_where .= $search_sql_fragment;
-    $query->set( 'search', '' ); // Evitar que WP_User_Query procese el 'search' original
-}
 
 // =========================================================================
 // == MANEJADORES AJAX - ENVÍO DE MENSAJES ==
@@ -726,11 +769,11 @@ function crm_send_whatsapp_message( $user_id, $message_text ) {
             // Construir el objeto del mensaje para el frontend
             $message_for_frontend = array(
                 'id'            => $post_id,
-                'text'          => $message_text,
+                'text'          => crm_format_chat_message_text_to_html( $message_text ),
                 'timestamp'     => $message_data['timestamp'], // Usar el timestamp que se guardó
                 'is_outgoing'   => true,
                 'type'          => 'text',
-                'caption'       => null,
+                'caption'       => crm_format_chat_message_text_to_html( null ), // Formatear aunque sea null
                 'attachment_id' => null,
                 'attachment_url'=> null,
             );
@@ -919,11 +962,11 @@ function crm_send_whatsapp_media_message( $user_id, $attachment_url, $mime_type,
             // El frontend usará 'attachment_url' directamente para la vista previa optimista.
             $message_for_frontend = array(
                 'id'            => $post_id,
-                'text'          => null, // El texto principal es el caption para media
+                'text'          => crm_format_chat_message_text_to_html( null ), // Formatear aunque sea null
                 'timestamp'     => $message_data['timestamp'], // Usar el timestamp que se guardó
                 'is_outgoing'   => true,
                 'type'          => $media_type, // El tipo de media detectado (image, video, etc.)
-                'caption'       => $caption,
+                'caption'       => crm_format_chat_message_text_to_html( $caption ),
                 'attachment_id' => null, // No tenemos un ID de adjunto local en este flujo
                 'attachment_url'=> $attachment_url, // La URL que se envió a la API
             );
@@ -962,6 +1005,9 @@ add_filter( 'upload_mimes', 'crm_allow_ogg_upload', 10, 1 );
 /**
  * AJAX Handler para obtener los detalles de un contacto para el sidebar.
  */
+/**
+ * AJAX Handler para obtener los detalles de un contacto para el sidebar.
+ */
 function crm_get_contact_details_callback() {
     //crm_log( 'Recibida petición AJAX: crm_get_contact_details' );
 
@@ -991,6 +1037,14 @@ function crm_get_contact_details_callback() {
     $jid = get_user_meta( $user_id, '_crm_whatsapp_jid', true ); // JID
     $tag_key = get_user_meta( $user_id, '_crm_lifecycle_tag', true ); // Clave de la etiqueta
     $notes = get_user_meta( $user_id, '_crm_contact_notes', true ); // Notas (si las hubiera)
+    // --- INICIO: Obtener metadatos adicionales ---
+    $is_group = (bool) get_user_meta( $user_id, '_crm_is_group', true );
+    $is_favorite = (bool) get_user_meta( $user_id, '_crm_is_favorite', true );
+    $instance_name = get_user_meta( $user_id, '_crm_instance_name', true );
+    $is_business = (bool) get_user_meta( $user_id, '_crm_isBusiness', true );
+    $description = get_user_meta( $user_id, '_crm_description', true );
+    $website = get_user_meta( $user_id, '_crm_website', true );
+    // --- FIN: Obtener metadatos adicionales ---
 
     // Fecha de registro
     $registration_date = date_i18n( get_option( 'date_format' ), strtotime( $user_data->user_registered ) );
@@ -1006,6 +1060,7 @@ function crm_get_contact_details_callback() {
         'display_name' => $user_data->display_name,
         'email'        => $user_data->user_email,
         'phone'        => $phone ?: 'N/D',
+        'is_group'     => $is_group, // <-- LÍNEA AÑADIDA AQUÍ
         'jid'          => $jid ?: 'N/D',
         'tag_key'      => $tag_key ?: '', // Enviar clave para posible edición
         'tag_name'     => $tag_name ?: 'Sin etiqueta', // Nombre legible
@@ -1017,6 +1072,13 @@ function crm_get_contact_details_callback() {
         'role'              => !empty($user_data->roles) ? translate_user_role( $user_data->roles[0] ) : 'N/A',
         'role_key'          => !empty($user_data->roles) ? $user_data->roles[0] : '', // Clave del rol
         'registration_date' => $registration_date,
+        // --- INICIO: Añadir nuevos metadatos a la respuesta ---
+        'is_favorite'       => $is_favorite,
+        'instance_name'     => $instance_name ?: 'N/D',
+        'is_business'       => $is_business,
+        'description'       => $description ?: '',
+        'website'           => $website ?: '',
+        // --- FIN: Añadir nuevos metadatos a la respuesta ---
     );
 
     // --- INICIO: Obtener última compra de WooCommerce ---
@@ -1070,6 +1132,7 @@ function crm_get_contact_details_callback() {
     //crm_log( "Enviando detalles del contacto User ID: {$user_id} al frontend.", 'INFO' );
     wp_send_json_success( $contact_details );
 }
+
 add_action( 'wp_ajax_crm_get_contact_details', 'crm_get_contact_details_callback' );
 
 /**
@@ -1184,6 +1247,7 @@ add_action( 'wp_ajax_crm_get_etiquetas_for_select', 'crm_get_etiquetas_for_selec
 
 /**
  * AJAX Handler para obtener la lista de roles de WordPress editables.
+
  * Llamado desde app.js para el sidebar de detalles del contacto, en modo edición.
  */
 function crm_get_wordpress_roles_callback() {
@@ -1271,7 +1335,6 @@ function crm_update_contact_avatar_callback() {
 }
 add_action( 'wp_ajax_crm_update_contact_avatar', 'crm_update_contact_avatar_callback' );
 
-
 /**
  * Envía un mensaje de WhatsApp (texto o multimedia) a través de una instancia específica de Evolution API.
  * Obtiene el perfil del contacto, procesa/crea el usuario en WP si el número existe en WA,
@@ -1285,7 +1348,7 @@ add_action( 'wp_ajax_crm_update_contact_avatar', 'crm_update_contact_avatar_call
  * @return array|WP_Error Respuesta de la API Evolution o WP_Error en caso de fallo.
  */
 function crm_external_send_whatsapp_message( $recipient_identifier, $message_content, $target_instance_name, $media_url = null, $media_filename = null ) {
-    //crm_log( "[External Send V5 - FetchProfile & NumberExists] Iniciando. Destinatario: {$recipient_identifier}, Instancia: {$target_instance_name}", 'INFO' );
+    error_log( "[External Send V5 - FetchProfile & NumberExists] Iniciando. Destinatario: {$recipient_identifier}, Instancia: {$target_instance_name}" );
 
     // 1. Validar nombre de instancia
     if ( empty( $target_instance_name ) ) {
@@ -1430,3 +1493,473 @@ function crm_external_send_whatsapp_message( $recipient_identifier, $message_con
 
     return $api_response;
 }
+
+/**
+ * Procesa un número de teléfono: busca en todas las instancias activas,
+ * obtiene el perfil de WhatsApp, y luego crea o actualiza el usuario en WordPress.
+ * Siempre actualiza el _crm_instance_name del usuario WP con la instancia que encontró el perfil.
+ *
+ * @param string $phone_number_from_ui Número de teléfono (con prefijo) ingresado por el usuario.
+ * @return int|WP_Error El ID del usuario de WordPress (nuevo o actualizado) o un WP_Error en caso de fallo.
+ */
+function crm_process_whatsapp_contact_by_phone($phone_number_from_ui) {
+    if (empty($phone_number_from_ui)) {
+        return new WP_Error('missing_phone_number_main', 'Número de teléfono no proporcionado.');
+    }
+    error_log("[CRM Process Contact] Iniciando para número: {$phone_number_from_ui}");
+
+    // 1. Obtener la URL base y el token global de la API de Evolution
+    $api_url_base = get_option('crm_evolution_api_url');
+    $api_token = get_option('crm_evolution_api_token');
+    error_log("[CRM Process Contact] DEBUG: API URL Base (get_option): " . $api_url_base);
+    error_log("[CRM Process Contact] DEBUG: API Token Global (get_option): " . ($api_token ? 'Token Presente' : 'Token VACÍO'));
+
+    if (empty($api_url_base) || empty($api_token)) {
+        return new WP_Error('api_config_error_main', 'La configuración de la API de Evolution no está completa.');
+    }
+
+    // 2. Realizar la llamada directa a /instance/fetchInstances usando wp_remote_request
+    $instances_endpoint = rtrim($api_url_base, '/') . '/instance/fetchInstances';
+    $args_instances = array(
+        'method'    => 'GET',
+        'timeout'   => 30,
+        'redirection' => 5,
+        'httpversion' => '1.1',
+        'blocking'  => true,
+        'headers'   => array(
+            'apikey' => $api_token, // Usar el token global
+            'Content-Type' => 'application/json',
+        ),
+        'cookies'   => array(),
+        'sslverify' => false,
+    );
+
+    error_log("[CRM Process Contact] Request directa a /instance/fetchInstances. URL: {$instances_endpoint}, Headers: " . print_r($args_instances['headers'], true));
+    $instances_response_raw = wp_remote_request($instances_endpoint, $args_instances);
+
+    error_log("[CRM Process Contact] Respuesta CRUDA directa para /instance/fetchInstances: " . print_r($instances_response_raw, true));
+
+    // 3. Manejar la respuesta de /instance/fetchInstances
+    if (is_wp_error($instances_response_raw)) {
+        error_log("[CRM Process Contact] WP_Error en llamada directa a /instance/fetchInstances: " . $instances_response_raw->get_error_message());
+        return new WP_Error('fetch_instances_failed_wp_error', 'Error al conectar con la API para obtener instancias: ' . $instances_response_raw->get_error_message());
+    }
+
+    $instances_body = wp_remote_retrieve_body($instances_response_raw);
+    $instances_http_code = wp_remote_retrieve_response_code($instances_response_raw);
+    $instances_decoded_body = json_decode($instances_body, true);
+
+    error_log("[CRM Process Contact] Respuesta /instance/fetchInstances - HTTP Code: {$instances_http_code}, Body: {$instances_body}");
+
+    if ($instances_http_code < 200 || $instances_http_code >= 300 || !is_array($instances_decoded_body) || empty($instances_decoded_body)) {
+        $error_message_detail = "HTTP Code: {$instances_http_code}. ";
+        if (!empty($instances_body)) {
+            $error_message_detail .= "Body: " . esc_html(substr($instances_body, 0, 200));
+        } else {
+            $error_message_detail .= "Cuerpo de respuesta vacío o no es un array.";
+        }
+        error_log("[CRM Process Contact] Error al obtener instancias: Respuesta inesperada. " . $error_message_detail);
+        return new WP_Error('fetch_instances_failed_format', 'Respuesta inesperada de la API al obtener instancias: ' . $error_message_detail);
+    }
+
+    // Si llegamos aquí, la respuesta es válida y $instances_decoded_body contiene el array de instancias.
+    $all_instances = $instances_decoded_body;
+    $found_profile_api_data = null;
+    $instance_that_found_profile = null;
+
+    // 4. Bucle: Iterar sobre cada instancia activa, llamando a fetchProfile
+    foreach ($all_instances as $instance_data_loop) {
+        if (isset($instance_data_loop['instance']['status']) && $instance_data_loop['instance']['status'] === 'open') {
+            $current_instance_name = $instance_data_loop['instance']['instanceName'];
+            $profile_endpoint_loop = '/chat/fetchProfile/' . $current_instance_name;
+            $payload_loop = ['number' => $phone_number_from_ui];
+            
+            error_log("[CRM Process Contact] Intentando fetchProfile para {$phone_number_from_ui} en instancia {$current_instance_name}");
+            // Usamos crm_evolution_api_request_v2 para esta llamada, asumiendo que maneja bien POST y la API Key de instancia si es necesario
+            $profile_response_loop = crm_evolution_api_request_v2($profile_endpoint_loop, $payload_loop, 'POST', $current_instance_name);
+
+            // Verificar la respuesta de fetchProfile directamente por 'numberExists'
+            if (!is_wp_error($profile_response_loop) && isset($profile_response_loop['numberExists']) && $profile_response_loop['numberExists'] === true) {
+                $found_profile_api_data = $profile_response_loop; // La respuesta es el perfil directamente
+                $instance_that_found_profile = $current_instance_name;
+                error_log("[CRM Process Contact] Perfil encontrado para {$phone_number_from_ui} en instancia {$instance_that_found_profile}.");
+                break; 
+            } else {
+                $error_detail = 'Respuesta inesperada o número no existe.';
+                if (is_wp_error($profile_response_loop)) {
+                    $error_detail = 'WP_Error: ' . $profile_response_loop->get_error_message();
+                } elseif (isset($profile_response_loop['numberExists']) && $profile_response_loop['numberExists'] === false) {
+                    $error_detail = 'API indica que el número no existe (numberExists: false).';
+                } elseif (isset($profile_response_loop['message'])) {
+                    $error_detail = 'API Message: ' . $profile_response_loop['message'];
+                } elseif (isset($profile_response_loop['error'])) {
+                    $error_detail = 'API Error: ' . $profile_response_loop['error'];
+                }
+                error_log("[CRM Process Contact] No se encontró perfil para {$phone_number_from_ui} en instancia {$current_instance_name}. Detalle: {$error_detail}");
+            }
+        }
+    }
+
+    // 5. Si ninguna instancia devuelve numberExists: true: Envía un error.
+    if (!$found_profile_api_data) {
+        error_log("[CRM Process Contact] El número {$phone_number_from_ui} no tiene WhatsApp o no se encontró en las instancias activas.");
+        return new WP_Error('profile_not_found_in_any_instance_main', 'El número no tiene WhatsApp o no se pudo verificar en las instancias activas.');
+    }
+
+    // 6. Perfil encontrado en WhatsApp. Obtener datos.
+    $api_profile_data = $found_profile_api_data; 
+
+    if (empty($api_profile_data) || !isset($api_profile_data['wuid'])) {
+        error_log('[CRM Process Contact] Error: Datos del perfil de API incompletos o inválidos (falta wuid). Data: ' . print_r($api_profile_data, true));
+        return new WP_Error('invalid_profile_data_main_wuid', 'Datos del perfil de API incompletos o inválidos (falta wuid).');
+    }
+
+    $jid_from_api = sanitize_text_field($api_profile_data['wuid']);
+    $name_from_api = isset($api_profile_data['name']) ? sanitize_text_field($api_profile_data['name']) : ($api_profile_data['verifiedName'] ?? '');
+    $profile_pic_url = isset($api_profile_data['picture']) ? esc_url_raw($api_profile_data['picture']) : '';
+    $is_business = isset($api_profile_data['isBusiness']) ? (bool) $api_profile_data['isBusiness'] : null;
+    $description = isset($api_profile_data['description']) ? sanitize_text_field($api_profile_data['description']) : null;
+    
+    $phone_number_parts = explode('@', $jid_from_api);
+    $phone_number_clean = $phone_number_parts[0];
+
+    // 7. Buscar si el usuario YA EXISTE en WordPress por el JID de la API
+    $user_id = 0;
+    $users_by_jid = get_users([
+        'meta_key'   => '_crm_whatsapp_jid',
+        'meta_value' => $jid_from_api,
+        'number'     => 1,
+        'fields'     => 'ID'
+    ]);
+
+    if (!empty($users_by_jid)) {
+        $user_id = $users_by_jid[0];
+    }
+
+    $first_name_to_set = '';
+    $last_name_to_set = '';
+    if (!empty($name_from_api)) {
+        $name_parts = explode(' ', $name_from_api, 2);
+        $first_name_to_set = $name_parts[0];
+        $last_name_to_set = isset($name_parts[1]) ? $name_parts[1] : '';
+    }
+    $user_id_to_return = 0;
+
+    if ($user_id) {
+        // 8.A. Usuario WP EXISTE. Actualizar sus datos.
+        error_log("[CRM Process Contact] Usuario YA EXISTE en WP para JID {$jid_from_api}. User ID: {$user_id}. Actualizando datos.");
+        
+        $update_data_wp = [
+            'ID'           => $user_id,
+            'first_name'   => $first_name_to_set,
+            'last_name'    => $last_name_to_set,
+            'display_name' => !empty($name_from_api) ? $name_from_api : ('wa_' . $phone_number_clean),
+        ];
+        wp_update_user($update_data_wp);
+
+        update_user_meta($user_id, '_crm_instance_name', $instance_that_found_profile);
+        if ($is_business !== null) update_user_meta($user_id, '_crm_isBusiness', $is_business);
+        if ($description !== null) update_user_meta($user_id, '_crm_description', $description);
+        update_user_meta($user_id, 'billing_phone', $phone_number_clean);
+        update_user_meta($user_id, '_crm_whatsapp_jid', $jid_from_api);
+
+        $user_id_to_return = (int) $user_id;
+
+    } else {
+        // 8.B. Usuario WP NO EXISTE. Proceder a CREARLO.
+        error_log("[CRM Process Contact] Usuario NO existe en WP para JID {$jid_from_api}. Creando nuevo usuario.");
+
+        $username = 'wa_' . $phone_number_clean;
+        if (username_exists($username)) {
+            $username .= '_' . wp_rand(100, 999); 
+        }
+        $email = $phone_number_clean . '@whatsapp.placeholder'; 
+        if (email_exists($email)) {
+             $email = $phone_number_clean . '_' . wp_rand(100,999) . '@whatsapp.placeholder';
+        }
+
+        $user_data_to_create = [
+            'user_login'    => $username,
+            'user_email'    => $email,
+            'user_pass'     => wp_generate_password(),
+            'role'          => 'subscriber', 
+            'first_name'    => $first_name_to_set,
+            'last_name'     => $last_name_to_set,
+            'display_name'  => !empty($name_from_api) ? $name_from_api : $username,
+        ];
+
+        $new_user_id = wp_insert_user($user_data_to_create);
+
+        if (is_wp_error($new_user_id)) {
+            error_log('[CRM Process Contact] Error al crear usuario WP: ' . $new_user_id->get_error_message());
+            return $new_user_id; 
+        }
+
+        update_user_meta($new_user_id, '_crm_whatsapp_jid', $jid_from_api);
+        update_user_meta($new_user_id, 'billing_phone', $phone_number_clean); 
+        update_user_meta($new_user_id, 'billing_first_name', $first_name_to_set);
+        update_user_meta($new_user_id, 'billing_last_name', $last_name_to_set);
+        update_user_meta($new_user_id, '_crm_is_group', false);
+        update_user_meta($new_user_id, '_crm_is_favorite', false);
+        update_user_meta($new_user_id, '_crm_instance_name', $instance_that_found_profile);
+        if ($is_business !== null) update_user_meta($new_user_id, '_crm_isBusiness', $is_business);
+        if ($description !== null) update_user_meta($new_user_id, '_crm_description', $description);
+        
+        if (function_exists('crm_get_lifecycle_tags')) {
+            $lifecycle_tags = crm_get_lifecycle_tags(); 
+            if (!empty($lifecycle_tags)) {
+                $first_tag_key = array_key_first($lifecycle_tags);
+                if ($first_tag_key) {
+                    update_user_meta($new_user_id, '_crm_lifecycle_tag', $first_tag_key);
+                }
+            }
+        }
+        $user_id_to_return = (int) $new_user_id;
+        error_log("[CRM Process Contact] Nuevo usuario creado con ID: {$user_id_to_return} para JID {$jid_from_api}");
+    }
+
+    // 9. Descargar y asignar/actualizar avatar
+    if ($user_id_to_return > 0 && !empty($profile_pic_url)) {
+        $user_for_avatar = get_userdata($user_id_to_return);
+        $display_name_for_avatar = $user_for_avatar ? $user_for_avatar->display_name : 'Avatar Contacto';
+        $attachment_id = media_sideload_image($profile_pic_url, 0, $display_name_for_avatar, 'id');
+
+        if (!is_wp_error($attachment_id)) {
+            $old_avatar_id = get_user_meta($user_id_to_return, '_crm_avatar_attachment_id', true);
+            if ($old_avatar_id && $old_avatar_id != $attachment_id) {
+                wp_delete_attachment(intval($old_avatar_id), true);
+                error_log("[CRM Process Contact] Avatar anterior (ID: {$old_avatar_id}) eliminado para User ID {$user_id_to_return}.");
+            }
+            update_user_meta($user_id_to_return, '_crm_avatar_attachment_id', $attachment_id);
+            error_log("[CRM Process Contact] Avatar actualizado/asignado para User ID {$user_id_to_return}. Nuevo Attachment ID: {$attachment_id}");
+        } else {
+            error_log("[CRM Process Contact] Error al descargar/guardar avatar para User ID {$user_id_to_return} desde {$profile_pic_url}: " . $attachment_id->get_error_message());
+        }
+    }
+    return $user_id_to_return;
+}
+
+/**
+ * AJAX Handler para el proceso de "Nuevo Chat".
+ * Recibe un número de teléfono, llama a crm_process_whatsapp_contact_by_phone
+ * y devuelve los datos del usuario WP al frontend.
+ */
+function crm_fetch_whatsapp_profile_ajax_callback() {
+    check_ajax_referer('crm_evolution_sender_nonce', '_ajax_nonce'); 
+
+    // if (!current_user_can('edit_posts')) { 
+    //     wp_send_json_error(['message' => 'No tienes permisos para realizar esta acción.'], 403);
+    //     return;
+    // }
+
+    $phone_number = isset($_POST['phone_number']) ? sanitize_text_field(wp_unslash($_POST['phone_number'])) : '';
+
+    if (empty($phone_number)) {
+        wp_send_json_error(['message' => 'Número de teléfono no proporcionado.'], 400);
+        return;
+    }
+
+    // Llamar a la función principal que maneja todo el flujo
+    $user_id_or_error = crm_process_whatsapp_contact_by_phone($phone_number);
+
+    if (is_wp_error($user_id_or_error)) {
+        error_log("[CRM Fetch AJAX Callback] Error desde crm_process_whatsapp_contact_by_phone: " . $user_id_or_error->get_error_message());
+        wp_send_json_error(['message' => 'Error al procesar el contacto: ' . $user_id_or_error->get_error_message()], 500);
+    } else {
+        $user_id = (int) $user_id_or_error;
+        $wp_user = get_userdata($user_id);
+        $avatar_url = get_avatar_url($user_id); 
+        $contact_jid = $wp_user ? get_user_meta($user_id, '_crm_whatsapp_jid', true) : null;
+
+        error_log("[CRM Fetch AJAX Callback] Éxito. User ID: {$user_id}, JID: {$contact_jid}");
+        wp_send_json_success([
+            'message'       => 'Contacto procesado correctamente.',
+            'user_id'       => $user_id,
+            'display_name'  => $wp_user ? $wp_user->display_name : 'N/A',
+            'avatar_url'    => $avatar_url,
+            'jid'           => $contact_jid, 
+        ]);
+    }
+}
+add_action('wp_ajax_crm_fetch_whatsapp_profile_ajax', 'crm_fetch_whatsapp_profile_ajax_callback');
+
+/**
+ * AJAX Handler para obtener todas las instancias de Evolution API.
+ * Llamado desde app.js para poblar el menú de filtro de instancias.
+ */
+function crm_get_all_evolution_instances_ajax_callback() {
+    check_ajax_referer('crm_evolution_sender_nonce', '_ajax_nonce');
+    error_log("[CRM Get Instances AJAX] Petición recibida.");
+
+    // Usar una capacidad apropiada, por ejemplo, la misma que para ver la página de chats.
+    if (!current_user_can('edit_posts')) { 
+        error_log("[CRM Get Instances AJAX] Error: Permiso denegado.");
+        wp_send_json_error(['message' => 'No tienes permisos para realizar esta acción.'], 403);
+        return;
+    }
+
+    // Obtener la URL base y el token global de la API de Evolution
+    $api_url_base = get_option('crm_evolution_api_url');
+    $api_token = get_option('crm_evolution_api_token');
+
+    if (empty($api_url_base) || empty($api_token)) {
+        error_log("[CRM Get Instances AJAX] Error: Configuración API incompleta.");
+        wp_send_json_error(['message' => 'La configuración de la API de Evolution no está completa.'], 500);
+        return;
+    }
+
+    // Realizar la llamada directa a /instance/fetchInstances usando wp_remote_request
+    // (similar a como lo hicimos en crm_process_whatsapp_contact_by_phone)
+    $instances_endpoint = rtrim($api_url_base, '/') . '/instance/fetchInstances';
+    $args_instances = array(
+        'method'    => 'GET',
+        'timeout'   => 30,
+        'headers'   => array('apikey' => $api_token),
+        'sslverify' => false, // Ajustar según tu entorno
+    );
+
+    $instances_response_raw = wp_remote_request($instances_endpoint, $args_instances);
+
+    if (is_wp_error($instances_response_raw)) {
+        error_log("[CRM Get Instances AJAX] WP_Error al llamar a API: " . $instances_response_raw->get_error_message());
+        wp_send_json_error(['message' => 'Error al conectar con la API para obtener instancias: ' . $instances_response_raw->get_error_message()], 500);
+        return;
+    }
+
+    $instances_body = wp_remote_retrieve_body($instances_response_raw);
+    $instances_http_code = wp_remote_retrieve_response_code($instances_response_raw);
+    $instances_decoded_body = json_decode($instances_body, true);
+
+    if ($instances_http_code < 200 || $instances_http_code >= 300 || !is_array($instances_decoded_body)) {
+        error_log("[CRM Get Instances AJAX] Respuesta API inesperada. Código: {$instances_http_code}, Body: " . substr($instances_body, 0, 200));
+        wp_send_json_error(['message' => 'Respuesta inesperada de la API al obtener instancias. Código: ' . $instances_http_code], 500);
+        return;
+    }
+
+    // La API de Evolution para /instance/fetchInstances devuelve directamente el array de instancias
+    error_log("[CRM Get Instances AJAX] Instancias obtenidas con éxito: " . count($instances_decoded_body) . " encontradas.");
+    wp_send_json_success($instances_decoded_body);
+}
+add_action('wp_ajax_crm_get_all_evolution_instances_ajax', 'crm_get_all_evolution_instances_ajax_callback');
+
+
+// =========================================================================
+// == MANEJADOR AJAX - MARCAR/DESMARCAR FAVORITO ==
+// =========================================================================
+
+/**
+ * AJAX Handler para marcar o desmarcar un contacto como favorito.
+ */
+function crm_toggle_favorite_contact_ajax_callback() {
+    //crm_log( 'Recibida petición AJAX: crm_toggle_favorite_contact' );
+
+    // 1. Verificar Nonce y Permisos
+    check_ajax_referer( 'crm_evolution_sender_nonce', '_ajax_nonce' );
+    // Usar 'edit_posts' ya que es la capacidad para interactuar con la interfaz de chats
+    if ( ! current_user_can( 'edit_posts' ) ) {
+        //crm_log( 'Error AJAX: Permiso denegado para crm_toggle_favorite_contact.', 'ERROR' );
+        wp_send_json_error( array( 'message' => 'No tienes permisos suficientes.' ), 403 );
+    }
+
+    // 2. Obtener y sanitizar datos
+    $user_id = isset( $_POST['user_id'] ) ? absint( $_POST['user_id'] ) : 0;
+    // Convertir el string 'true'/'false' o 1/0 a booleano
+    $is_favorite_raw = isset( $_POST['is_favorite'] ) ? $_POST['is_favorite'] : 'false';
+    $is_favorite = filter_var( $is_favorite_raw, FILTER_VALIDATE_BOOLEAN );
+
+    // 3. Validar User ID
+    if ( $user_id <= 0 ) {
+        //crm_log( 'Error AJAX: User ID inválido para marcar como favorito.', 'ERROR' );
+        wp_send_json_error( array( 'message' => 'ID de usuario inválido.' ), 400 );
+    }
+
+    // 4. Actualizar el metadato del usuario
+    $meta_key = '_crm_is_favorite';
+    if ( update_user_meta( $user_id, $meta_key, $is_favorite ) ) {
+        //crm_log( "Estado de favorito para User ID {$user_id} actualizado a: " . ($is_favorite ? 'true' : 'false'), 'INFO' );
+        wp_send_json_success( array( 'message' => 'Estado de favorito actualizado correctamente.' ) );
+    } else {
+        //crm_log( "Error al actualizar el metadato de favorito para User ID {$user_id}.", 'ERROR' );
+        wp_send_json_error( array( 'message' => 'Error al actualizar el estado de favorito.' ) );
+    }
+}
+add_action( 'wp_ajax_crm_toggle_favorite_contact', 'crm_toggle_favorite_contact_ajax_callback' );
+
+
+// =========================================================================
+// == MANEJADOR AJAX - ELIMINAR CONTACTO O GRUPO ==
+// =========================================================================
+
+/**
+ * AJAX Handler para eliminar un contacto (usuario WP) o un grupo (representado como usuario WP).
+ * Si el contacto tiene órdenes de WooCommerce, estas se desvinculan (se convierten a invitado).
+ */
+function crm_delete_contact_or_group_ajax_callback() {
+    //crm_log( 'Recibida petición AJAX: crm_delete_contact_or_group' );
+
+    // 1. Verificar Nonce y Permisos
+    check_ajax_referer( 'crm_evolution_sender_nonce', '_ajax_nonce' );
+    // Se necesita una capacidad que permita eliminar usuarios. 'delete_users' es la más apropiada.
+    if ( ! current_user_can( 'delete_users' ) ) {
+        //crm_log( 'Error AJAX: Permiso denegado para crm_delete_contact_or_group.', 'ERROR' );
+        wp_send_json_error( array( 'message' => 'No tienes permisos suficientes para eliminar usuarios/contactos.' ), 403 );
+    }
+
+    // 2. Obtener y validar User ID
+    $user_id_to_delete = isset( $_POST['user_id'] ) ? absint( $_POST['user_id'] ) : 0;
+    if ( $user_id_to_delete <= 0 ) {
+        //crm_log( 'Error AJAX: User ID inválido para eliminar.', 'ERROR' );
+        wp_send_json_error( array( 'message' => 'ID de usuario inválido para eliminar.' ), 400 );
+    }
+
+    // No permitir eliminar al usuario actual
+    if ( get_current_user_id() == $user_id_to_delete ) {
+        //crm_log( 'Error AJAX: Intento de autoeliminación.', 'ERROR' );
+        wp_send_json_error( array( 'message' => 'No puedes eliminar tu propia cuenta desde aquí.' ), 400 );
+    }
+    
+    // No permitir eliminar al usuario con ID 1 (generalmente el admin principal)
+    if ( $user_id_to_delete === 1 ) {
+        //crm_log( 'Error AJAX: Intento de eliminar usuario administrador principal (ID 1).', 'ERROR' );
+        wp_send_json_error( array( 'message' => 'No se puede eliminar el usuario administrador principal.' ), 400 );
+    }
+
+
+    // 3. Si es un contacto (no un grupo) y WooCommerce está activo, desvincular órdenes
+    $is_group = (bool) get_user_meta( $user_id_to_delete, '_crm_is_group', true );
+
+    if ( ! $is_group && class_exists( 'WooCommerce' ) ) {
+        //crm_log( "Contacto ID {$user_id_to_delete} no es grupo. Verificando órdenes de WooCommerce." );
+        $orders = wc_get_orders( array(
+            'customer_id' => $user_id_to_delete,
+            'limit'       => -1, // Todas las órdenes
+        ) );
+
+        if ( ! empty( $orders ) ) {
+            //crm_log( "Contacto ID {$user_id_to_delete} tiene " . count($orders) . " órdenes. Desvinculando..." );
+            foreach ( $orders as $order ) {
+                if ( $order instanceof WC_Order ) {
+                    $order->set_customer_id( 0 ); // Establecer como orden de invitado
+                    $order->save();
+                    //crm_log( "Orden ID {$order->get_id()} desvinculada del User ID {$user_id_to_delete}." );
+                }
+            }
+        }
+    }
+
+    // 4. Eliminar el usuario de WordPress
+    // wp_delete_user() se encarga de eliminar los metadatos del usuario.
+    // El hook 'delete_user' (crm_delete_user_avatar_on_user_delete) se encargará del avatar.
+    // Los CPT 'crm_chat' cuyo post_author sea este user_id se eliminarán por defecto si no se reasignan.
+    $deleted = wp_delete_user( $user_id_to_delete );
+
+    if ( $deleted ) {
+        $entity_type = $is_group ? 'Grupo' : 'Contacto';
+        //crm_log( "{$entity_type} (User ID: {$user_id_to_delete}) eliminado correctamente de WordPress.", 'INFO' );
+        wp_send_json_success( array( 'message' => $entity_type . ' eliminado correctamente.' ) );
+    } else {
+        //crm_log( "Error al eliminar el usuario/grupo (User ID: {$user_id_to_delete}) de WordPress.", 'ERROR' );
+        wp_send_json_error( array( 'message' => 'Error al eliminar el usuario/grupo de WordPress.' ) );
+    }
+}
+add_action( 'wp_ajax_crm_delete_contact_or_group', 'crm_delete_contact_or_group_ajax_callback' );

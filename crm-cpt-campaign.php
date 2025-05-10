@@ -685,6 +685,21 @@ function crm_handle_campaign_scheduling_on_status_change( $new_status, $old_stat
              update_post_meta( $post_id, '_crm_campaign_sent_count', 0 );
              update_post_meta( $post_id, '_crm_campaign_failed_count', 0 );
              update_post_meta( $post_id, '_crm_campaign_last_processed_user_id', 0 );
+
+            // Limpiar los marcadores de intentos fallidos para esta campaña
+            $failed_attempt_meta_key = '_crm_campaign_failed_attempt_' . $post_id;
+            $args_failed_users = array(
+                'meta_key'   => $failed_attempt_meta_key,
+                'meta_value' => '1', // Asumimos que guardamos '1' o true
+                'fields'     => 'ID',
+                'number'     => -1,
+            );
+            $failed_users_query = new WP_User_Query( $args_failed_users );
+            $failed_user_ids = $failed_users_query->get_results();
+            foreach ( $failed_user_ids as $failed_user_id ) {
+                delete_user_meta( $failed_user_id, $failed_attempt_meta_key );
+            }
+            error_log( "[CRON_SCHEDULER][{$post_id}] Marcadores de intentos fallidos previos limpiados para " . count($failed_user_ids) . " usuarios." );
             //  error_log( "[CRON_SCHEDULER][{$post_id}] Contadores reseteados." );
         }
     }
@@ -727,6 +742,7 @@ function crm_process_campaign_batch_callback( $campaign_id ) {
 
     // Buscar el siguiente usuario
     $user_meta_key_sent = '_crm_campaign_sent_' . $campaign_id;
+    $user_meta_key_failed_attempt = '_crm_campaign_failed_attempt_' . $campaign_id;
     $user_query_args = array(
         'number' => 1,
         'orderby' => 'ID',
@@ -737,6 +753,7 @@ function crm_process_campaign_batch_callback( $campaign_id ) {
             array( 'key' => '_crm_whatsapp_jid', 'compare' => 'EXISTS' ),
             array( 'key' => '_crm_whatsapp_jid', 'value' => '', 'compare' => '!=' ),
             array( 'key' => $user_meta_key_sent, 'compare' => 'NOT EXISTS' ),
+            array( 'key' => $user_meta_key_failed_attempt, 'compare' => 'NOT EXISTS' ), // Excluir si ya falló en esta campaña
             array( 'relation' => 'OR' )
         ),
     );
@@ -822,6 +839,7 @@ function crm_process_campaign_batch_callback( $campaign_id ) {
         // error_log( "[CRON][{$campaign_id}] Fallo al enviar a User ID {$user_id_to_process}: " . $send_result->get_error_message());
         $failed_count = (int) get_post_meta( $campaign_id, '_crm_campaign_failed_count', true );
         update_post_meta( $campaign_id, '_crm_campaign_failed_count', $failed_count + 1 );
+        update_user_meta( $user_id_to_process, $user_meta_key_failed_attempt, '1' ); // Marcar como intento fallido para esta campaña
     } else {
         // error_log( "[CRON][{$campaign_id}] Envío exitoso (o API aceptó) a User ID {$user_id_to_process}." );
         $sent_count = (int) get_post_meta( $campaign_id, '_crm_campaign_sent_count', true );

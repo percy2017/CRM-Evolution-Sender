@@ -24,26 +24,46 @@ function crm_evolution_sender_chat_history_page_html() {
         <div id="crm-chat-container" class="crm-chat-container">
             <div id="chat-list-column" class="chat-list-column">
                 <div class="chat-list-header">
-                    <!-- <h2><?php esc_html_e( 'Conversaciones', CRM_EVOLUTION_SENDER_TEXT_DOMAIN ); ?></h2> -->
-                    <!-- Inicio: Campo de búsqueda -->
+                    <div class="chat-list-top-bar">
+                        <h3 class="chat-list-title"><?php esc_html_e( 'Chats', CRM_EVOLUTION_SENDER_TEXT_DOMAIN ); ?></h3>
+                        <div class="chat-list-actions">
+                            <button id="add-new-chat-button" class="button-icon" title="<?php esc_attr_e( 'Nuevo/Actualizar Usuario', CRM_EVOLUTION_SENDER_TEXT_DOMAIN ); ?>">
+                                <span class="dashicons dashicons-plus-alt2"></span>
+                            </button>
+                            <div class="dropdown-menu-container">
+                                <button id="instance-filter-button" class="button-icon" title="<?php esc_attr_e( 'Instancias', CRM_EVOLUTION_SENDER_TEXT_DOMAIN ); ?>">
+                                    <span class="dashicons dashicons-menu-alt"></span>
+                                </button>
+                                <div id="instance-filter-dropdown" class="dropdown-menu" style="display: none;">
+                                    <a href="#" data-instance="all" class="instance-filter-item active"><?php esc_html_e( 'Todas las instancias', CRM_EVOLUTION_SENDER_TEXT_DOMAIN ); ?></a>
+                                    <!-- Las instancias se cargarán aquí con JS -->
+                                    <!-- Ejemplo: <a href="#" data-instance="instance_name_1" class="instance-filter-item">Instancia 1</a> -->
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
                     <div class="chat-search-container">
                         <input type="search" id="chat-search-input" placeholder="<?php esc_attr_e( 'Buscar o empezar un chat nuevo', CRM_EVOLUTION_SENDER_TEXT_DOMAIN ); ?>">
                     </div>
-                    <!-- Fin: Campo de búsqueda -->
-                    <!-- Inicio: Filtros de Chat -->
+
                     <div class="chat-list-filters">
                         <button class="filter-button active" data-filter="all"><?php esc_html_e( 'Todos', CRM_EVOLUTION_SENDER_TEXT_DOMAIN ); ?></button>
                         <button class="filter-button" data-filter="favorites"><?php esc_html_e( 'Favoritos', CRM_EVOLUTION_SENDER_TEXT_DOMAIN ); ?></button>
                         <button class="filter-button" data-filter="contacts"><?php esc_html_e( 'Contactos', CRM_EVOLUTION_SENDER_TEXT_DOMAIN ); ?></button>
                         <button class="filter-button" data-filter="groups"><?php esc_html_e( 'Grupos', CRM_EVOLUTION_SENDER_TEXT_DOMAIN ); ?></button>
                     </div>
-                    <!-- Fin: Filtros de Chat -->
                 </div>
                 <div id="chat-list-items" class="chat-list-items">
                     <p><?php esc_html_e( 'Cargando conversaciones...', CRM_EVOLUTION_SENDER_TEXT_DOMAIN ); ?></p>
                 </div>
             </div>
             <div id="chat-view-column" class="chat-view-column"> <!-- Cambiado ID para claridad -->
+                <div id="active-chat-header" style="display: none;"> <!-- Mantenemos display:none aquí, el resto lo maneja CSS -->
+                    <img src="" alt="Avatar" class="chat-header-avatar">
+                    <span class="chat-header-name"></span>
+                </div>
+
                 <div id="chat-messages-area" class="chat-messages-area chat-placeholder-active"> <?php // Añadir clase inicial ?>
                     <!-- === INICIO: Placeholder WhatsApp Style === -->
                     <div class="chat-placeholder-container">
@@ -96,6 +116,12 @@ function crm_evolution_sender_chat_history_page_html() {
                         <span class="emoji-option">💯</span>
                         <span class="emoji-option">❓</span>
                         <span class="emoji-option">❗</span>
+                        <?php // --- Emojis Adicionales --- ?>
+                        <span class="emoji-option">👍</span>
+                        <span class="emoji-option">👎</span>
+                        <span class="emoji-option">👌</span>
+                        <span class="emoji-option">🤷</span>
+                        <span class="emoji-option">🎉</span>
 
                     </div>
                     <button id="emoji-picker-button" class="button button-secondary btn-emoji" title="Emojis"><span class="dashicons dashicons-smiley"></span></button> <?php // <-- Botón Emoji ?>
@@ -108,7 +134,7 @@ function crm_evolution_sender_chat_history_page_html() {
             </div>
             <!-- === INICIO: Nueva Columna para Detalles del Contacto === -->
             <div id="contact-details-column" class="contact-details-column" style="display: none;">
-                <div class="contact-details-header">
+                <div class="contact-details-header contact-details-main-header"> <!-- Clase añadida aquí -->
                     <h3><?php esc_html_e( 'Detalles del Contacto', CRM_EVOLUTION_SENDER_TEXT_DOMAIN ); ?></h3>
                     <!-- === INICIO: Botón Cerrar Sidebar === -->
                     <button id="close-contact-details" class="button-icon" title="<?php esc_attr_e( 'Cerrar detalles', CRM_EVOLUTION_SENDER_TEXT_DOMAIN ); ?>"><span class="dashicons dashicons-no-alt"></span></button>
