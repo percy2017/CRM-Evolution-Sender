@@ -154,10 +154,36 @@ function crm_evolution_sender_enqueue_assets( $hook ) {
 
     // Cargar app.js solo si estamos en una página que lo necesite (Ajustes, Chat History?)
     if ( in_array($hook, ['crm-evolution_page_crm-evolution-sender-settings', 'crm-evolution_page_crm-evolution-chat-history']) ) {
+        
+        $app_js_dependencies = array('jquery', 'thickbox', 'sweetalert2-js', 'datatables-js', 'intl-tel-input-js');
+
+        // Si estamos en la página de historial de chats, añadir dependencias de Socket.IO
+        if ( $hook === 'crm-evolution_page_crm-evolution-chat-history' ) {
+            // 1. Librería cliente de Socket.IO (desde CDN)
+            wp_enqueue_script(
+                'socket-io-client-custom', // Cambiamos el handle para reflejar que es de tu servidor
+                'https://socket.iptvbolivia.com/socket.io/socket.io.js', // URL de tu servidor Socket.IO
+                array(), // Sin dependencias propias
+                CRM_EVOLUTION_SENDER_VERSION, // O la versión de tu socket.io si la conoces
+                true // Cargar en el footer
+            );
+
+            // 2. Tu script de cliente Socket.IO
+            wp_enqueue_script(
+                'crm-socket-client',
+                CRM_EVOLUTION_SENDER_PLUGIN_URL . 'assets/crm-socket-client.js',
+                array('jquery', 'socket-io-client-custom'), // Depende de jQuery y la librería cliente de Socket.IO
+                CRM_EVOLUTION_SENDER_VERSION,
+                true // Cargar en el footer
+            );
+            // Añadir 'crm-socket-client' como dependencia para app.js
+            $app_js_dependencies[] = 'crm-socket-client';
+        }
+
         wp_enqueue_script(
             'crm-evolution-sender-appjs',
             CRM_EVOLUTION_SENDER_PLUGIN_URL . 'assets/app.js',
-            array('jquery', 'thickbox', 'sweetalert2-js', 'datatables-js', 'intl-tel-input-js'),
+            $app_js_dependencies, // Usar el array de dependencias dinámico
             CRM_EVOLUTION_SENDER_VERSION,
             true
         );
@@ -167,6 +193,7 @@ function crm_evolution_sender_enqueue_assets( $hook ) {
             'ajax_url' => admin_url( 'admin-ajax.php' ),
             'nonce'    => wp_create_nonce( 'crm_evolution_sender_nonce' ), // <-- Volver al nonce original
             'utils_script_path' => CRM_EVOLUTION_SENDER_PLUGIN_URL . 'assets/vendor/intl-tel-input/js/utils.js',
+            'socket_io_server_url' => 'https://socket.iptvbolivia.com', // URL de tu servidor Socket.IO en producción
             'i18n' => array(
                 'creatingText' => esc_js( __( 'Creando...', CRM_EVOLUTION_SENDER_TEXT_DOMAIN ) ),
             )

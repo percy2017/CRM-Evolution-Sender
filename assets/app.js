@@ -266,10 +266,6 @@
             // crm_js_log('Página de Historial de Chats detectada. Cargando conversaciones...');
             loadRecentConversations();
 
-            // 3. Inicializar Heartbeat
-            // crm_js_log('Inicializando Heartbeat para chat...');
-            initChatHeartbeat();
-
             // 4. Inicializar Buscador y botón cerrar sidebar
             // crm_js_log('Inicializando Buscador de Chats y handler de cierre de sidebar...');
             initChatSearchHandler();
@@ -448,6 +444,30 @@
             });
             // crm_js_log('Listener para #active-chat-header inicializado.');
             // --- FIN: Listener para la nueva cabecera del chat activo ---
+
+            // --- INICIO: Listener para mensajes nuevos recibidos vía Socket.IO ---
+            $(document).on('crm:newMessageBySocket', function(event, messageData) {
+                console.log('[App.js] Evento crm:newMessageBySocket recibido:', messageData);
+
+                if (messageData && messageData.contactUserId && parseInt(messageData.contactUserId) === parseInt(currentOpenChatUserId)) {
+                    // El mensaje es para el chat actualmente abierto
+                    console.log('[App.js] El mensaje del socket es para el chat activo. Renderizando...');
+                    const messagesContainer = $('#chat-messages-area');                    
+                    // Comprobar si el mensaje ya existe para evitar duplicados visuales
+                    if (messagesContainer.find(`.chat-message[data-msg-id="${messageData.id}"]`).length === 0) {
+                        renderSingleMessage(messageData, messagesContainer);
+                        messagesContainer.scrollTop(messagesContainer[0].scrollHeight); // Scroll al nuevo mensaje
+                    } else {
+                        console.log(`[App.js] Mensaje con ID ${messageData.id} (del socket) ya existe en la UI. Omitiendo.`);
+                    }
+                } else {
+                    // El mensaje es para otro chat o no hay chat abierto
+                    console.log('[App.js] El mensaje del socket NO es para el chat activo o no hay chat activo. UserID del mensaje:', messageData.contactUserId, 'Chat activo:', currentOpenChatUserId);
+                    // TODO: Considerar refrescar la lista de chats o mostrar un indicador de no leído
+                    loadRecentConversations(); // Refrescar la lista de chats para que aparezca el nuevo
+                }
+            });
+            // --- FIN: Listener para mensajes nuevos recibidos vía Socket.IO ---
 
             // --- INICIO: Listener para el botón "Nuevo Chat" (#add-new-chat-button) ---
             $(document).on('click', '#add-new-chat-button', function() {
@@ -758,7 +778,7 @@
         // crm_js_log(`Cabecera de chat activo poblada para: ${displayName}`);
         
         currentOpenChatUserId = userId; // Establecer el chat activo globalmente
-        lastDisplayedMessageTimestamp = 0; // Resetear timestamp para cargar todos los mensajes
+        // lastDisplayedMessageTimestamp = 0; // Resetear timestamp para cargar todos los mensajes
         loadConversationMessages(userId); // Cargar mensajes
         $('#chat-input-area').show(); // Mostrar área de input
     }
@@ -867,7 +887,7 @@
             openChatView(userId, jid, displayName, avatarUrl);
 
             currentOpenChatUserId = userId;
-            lastDisplayedMessageTimestamp = 0;
+            //lastDisplayedMessageTimestamp = 0;
             loadConversationMessages(userId);
             $('#chat-input-area').show();
         });
@@ -975,7 +995,7 @@
                     });
 
                     // Hacer scroll hasta el último mensaje
-                    lastDisplayedMessageTimestamp = latestTimestampInBatch; // <-- Guardar timestamp del último mensaje mostrado
+                    //lastDisplayedMessageTimestamp = latestTimestampInBatch; // <-- Guardar timestamp del último mensaje mostrado
                     messagesContainer.scrollTop(messagesContainer[0].scrollHeight);
 
                 } else if (response.success && response.data.length === 0) {
@@ -1037,7 +1057,14 @@
                             if (currentAttachment) {
                                 // crm_js_log(`[ENVIO] Intentando enviar adjunto a User ID: ${recipientUserId}`, 'INFO', currentAttachment);
                                 $sendButton.prop('disabled', true);
-                                performAjaxRequest('crm_send_media_message_ajax', { user_id: recipientUserId, attachment_url: currentAttachment.url, mime_type: currentAttachment.mime, filename: currentAttachment.filename, caption: messageText },
+                                performAjaxRequest('crm_send_media_message_ajax', {
+                                        user_id: recipientUserId,
+                                        attachment_url: currentAttachment.url,
+                                        mime_type: currentAttachment.mime,
+                                        filename: currentAttachment.filename,
+                                        caption: messageText,
+                                        attachment_id: currentAttachment.id // <-- AÑADIR ESTO
+                                    },
                                     function(response) { // onSuccess para envío de media
                                         console.log('[ENVIO-MEDIA] AJAX onSuccess ejecutado.', response);
                                         // Verificar si la respuesta del backend incluye el mensaje enviado
@@ -1072,11 +1099,85 @@
                             }
                         });
 
-                        $messageInput.off('keydown.sendMessage').on('keydown.sendMessage', function(event) { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); $sendButton.click(); } });
-                        
+                        // Listener para el input de mensaje (Enter para enviar y autoexpandir)
+                        $messageInput
+                            .off('keydown.sendMessage')
+                            .on('keydown.sendMessage', function(event) {
+                                if (event.key === 'Enter' && !event.shiftKey) {
+                                    event.preventDefault();
+                                    $sendButton.click();
+                                }
+                            })
+                            .off('input.autoexpand')
+                            .on('input.autoexpand', function() {
+                                this.style.height = 'auto'; // Resetear altura para calcular scrollHeight correctamente
+                                // Establecer una altura mínima (ej. la de una línea)
+                                const minHeight = parseInt($(this).css('line-height')) || 20;
+                                const newHeight = Math.max(minHeight, this.scrollHeight);
+                                this.style.height = newHeight + 'px';
+
+                                // Opcional: limitar altura máxima (ej. 150px)
+                                const maxHeight = 150;
+                                if (newHeight > maxHeight) {
+                                    this.style.height = maxHeight + 'px';
+                                    this.style.overflowY = 'scroll'; // Mostrar scroll si supera el máximo
+                                } else {
+                                    this.style.overflowY = 'hidden'; // Ocultar scroll si no supera
+                                }
+                            }).trigger('input.autoexpand'); // Disparar una vez al cargar para ajustar altura inicial
+
                         if ($emojiButton.length && $emojiContainer.length) {
                             $emojiButton.off('click.toggleEmoji').on('click.toggleEmoji', function(event) { /* ... lógica emoji ... */ $emojiContainer.slideToggle(150); });
-                            $emojiContainer.off('click.selectEmoji').on('click.selectEmoji', '.emoji-option', function(event) { /* ... lógica seleccionar emoji ... */ });
+                            $emojiContainer.off('click.selectEmoji').on('click.selectEmoji', '.emoji-option', function(event) {
+                                event.preventDefault();
+                                event.stopPropagation();
+
+                                const emojiText = $(this).text();
+                                const $messageInput = $('#chat-message-input'); // Asegurar referencia al input
+
+                                // Usar un pequeño timeout para permitir que el navegador procese
+                                // cualquier evento de UI pendiente (como el foco) antes de la inserción.
+                                setTimeout(function() {
+                                    $messageInput.focus(); // Enfocar el input JUSTO ANTES de manipular
+
+                                    // Sincronizar la manipulación del DOM con el ciclo de pintado del navegador
+                                    requestAnimationFrame(function() {
+                                        const currentVal = $messageInput.val();
+                                        let cursorPos = $messageInput[0].selectionStart;
+
+                                        // Fallback si selectionStart no es un número (ej. si el input no es focuseable o está deshabilitado)
+                                        if (typeof cursorPos !== 'number' || isNaN(cursorPos)) {
+                                            // console.warn('[Emoji Click] No se pudo obtener la posición del cursor, insertando al final.');
+                                            cursorPos = currentVal.length; // Insertar al final como fallback
+                                        }
+                                        // console.log('Emoji:', emojiText, 'CursorPos:', cursorPos, 'CurrentVal:', currentVal);
+
+                                        const newValue = currentVal.substring(0, cursorPos) + emojiText + currentVal.substring(cursorPos);
+                                        $messageInput.val(newValue);
+                                        
+                                        // Reposicionar el cursor después del emoji insertado
+                                        const newCursorPos = cursorPos + emojiText.length;
+                                        try {
+                                            // setSelectionRange puede fallar si el input no está visible o está deshabilitado
+                                            $messageInput[0].setSelectionRange(newCursorPos, newCursorPos);
+                                        } catch (e) {
+                                            // console.warn('[Emoji Click] Error setting cursor position:', e);
+                                            // No es crítico si falla, el emoji se insertó.
+                                        }
+                                        
+                                        // Disparar el evento 'input' para que autoexpand y otros listeners reaccionen
+                                        $messageInput.trigger('input'); 
+                                        // Si tuvieras un listener específico como 'input.autoexpand', también podrías usar:
+                                        // $messageInput.trigger('input.autoexpand');
+                                    }); // Fin de requestAnimationFrame
+
+                                }, 0); // Timeout de 0ms es suficiente para pasar al siguiente ciclo de eventos del navegador
+
+                                // Opcional: Ocultar el picker de emojis después de seleccionar uno
+                                // if ($emojiContainer.is(':visible')) {
+                                //     $emojiContainer.slideUp(150);
+                                // }
+                            });
                         } else {
                             // crm_js_log('[loadConversationMessages - complete] Error: No se encontró #emoji-picker-button o #emoji-picker-container.', 'WARN');
                         }
@@ -1549,72 +1650,11 @@
     // =========================================================================
 
     let currentOpenChatUserId = null; // ID del usuario cuya conversación está abierta
-    let lastDisplayedMessageTimestamp = 0; // Timestamp del último mensaje mostrado en el chat abierto
-    let lastChatCheckTimestamp = Math.floor(Date.now() / 1000); // Timestamp inicial al cargar la página
-
-    /**
-     * Inicializa los listeners de la API Heartbeat para el chat.
-     */
-    function initChatHeartbeat() {
-        const $ = jQuery;
-        // crm_js_log('Inicializando Heartbeat para actualizaciones de chat...');
-
-        $(document).on('heartbeat-send.crmChat', function(event, data) {
-            // Añadir nuestro timestamp al pulso saliente
-            data['crm_last_chat_check'] = lastChatCheckTimestamp; // Para refrescar lista general
-            if (currentOpenChatUserId) {
-                data['crm_current_open_chat_id'] = currentOpenChatUserId;
-                data['crm_last_message_timestamp'] = lastDisplayedMessageTimestamp; // Timestamp del último mensaje VISIBLE
-            }
-           
-        });
-
-        $(document).on('heartbeat-tick.crmChat', function(event, data) {
-            // crm_js_log('Heartbeat Tick: Respuesta recibida', 'DEBUG', data);
-
-            let listNeedsRefresh = false;
-            let openChatUpdated = false;
-
-            // 1. Comprobar si hay mensajes nuevos para el chat ABIERTO
-            if (data.hasOwnProperty('crm_new_messages_for_open_chat') && Array.isArray(data.crm_new_messages_for_open_chat) && data.crm_new_messages_for_open_chat.length > 0) {
-                // crm_js_log('Heartbeat Tick: Nuevos mensajes recibidos para el chat abierto.', 'INFO');
-                const messagesContainer = $('#chat-messages-area'); // <-- CORREGIDO ID
-                let latestTimestampInBatch = lastDisplayedMessageTimestamp;
-
-                data.crm_new_messages_for_open_chat.forEach(function(msg) {
-                    // Evitar duplicados (si el heartbeat fuera muy rápido)
-                    if (messagesContainer.find(`[data-msg-id="${msg.id}"]`).length === 0) {
-                        const renderedTimestamp = renderSingleMessage(msg, messagesContainer); // Usar función reutilizable
-                        if (renderedTimestamp > latestTimestampInBatch) {
-                            latestTimestampInBatch = renderedTimestamp;
-                        }
-                    }
-                });
-                lastDisplayedMessageTimestamp = latestTimestampInBatch; // Actualizar el timestamp del último mensaje
-                messagesContainer.scrollTop(messagesContainer[0].scrollHeight); // Scroll al final
-                openChatUpdated = true;
-            }
-
-            // 2. Comprobar si la lista general necesita refrescarse
-            if (data.hasOwnProperty('crm_needs_list_refresh') && data.crm_needs_list_refresh === true) {
-                listNeedsRefresh = true;
-            }
-
-            // 3. Actualizar timestamp de chequeo general y refrescar lista si es necesario
-            if (listNeedsRefresh) {
-                // crm_js_log('Heartbeat Tick: Se necesita refrescar la lista de conversaciones.');
-                lastChatCheckTimestamp = Math.floor(Date.now() / 1000);
-                // Solo recargar la lista si el chat abierto NO fue actualizado (para evitar recarga innecesaria)
-                // O si *siempre* quieres que la lista se reordene. Por ahora, evitamos recarga si ya actualizamos el chat abierto.
-                if (!openChatUpdated) {
-                    loadRecentConversations();
-                } else {
-                    // Opcional: Podríamos solo actualizar el snippet/hora del chat activo en la lista izquierda
-                    // sin recargar toda la lista. Por ahora, no hacemos nada extra aquí.
-                    // crm_js_log('Heartbeat Tick: Lista no refrescada porque el chat abierto ya fue actualizado.', 'DEBUG');
-                }
-            }
-        });
-    }
+    // La variable lastDisplayedMessageTimestamp ya no es necesaria aquí porque el Heartbeat
+    // para el chat activo se ha eliminado. La comprobación de duplicados visuales
+    // se hace directamente en renderSingleMessage y en el listener crm:newMessageBySocket.
+    // La variable lastChatCheckTimestamp también se elimina ya que era para el Heartbeat.
+    // Si necesitamos una forma de que el servidor notifique al cliente para refrescar la lista
+    // de chats (para mensajes en chats NO abiertos), se hará a través de un evento de socket dedicado.
 
 })(jQuery); // Fin de la encapsulación

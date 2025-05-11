@@ -54,55 +54,6 @@ add_action( 'wp_ajax_crm_get_active_instances', 'crm_get_active_instances_callba
 // =========================================================================
 
 /**
- * Formatea el texto de un mensaje de chat a HTML.
- * Convierte marcadores de negrita, cursiva, tachado y saltos de línea.
- *
- * @param string|null $text El texto a formatear.
- * @return string El texto formateado como HTML.
- */
-function crm_format_chat_message_text_to_html( $text ) {
-    if ( empty( $text ) ) {
-        return '';
-    }
-
-    // 1. Escapar HTML para seguridad, excepto para nuestras etiquetas permitidas después.
-    // Los reemplazos de abajo generarán HTML seguro.
-    $text = esc_html( $text );
-
-    // 2. Convertir marcadores a HTML
-    // Negrita: *texto* -> <strong>texto</strong>
-    $text = preg_replace( '/\*(.*?)\*/s', '<strong>$1</strong>', $text );
-    // Cursiva: _texto_ -> <em>texto</em>
-    $text = preg_replace( '/_(.*?)_/s', '<em>$1</em>', $text );
-    // Tachado: ~texto~ -> <s>texto</s>
-    $text = preg_replace( '/~(.*?)~/s', '<s>$1</s>', $text );
-
-    // 3. Convertir URLs a enlaces clickeables
-    // Expresión regular para encontrar URLs (http, https, www)
-    // Se asegura de no estar dentro de un atributo href o después de un >
-    $url_pattern = '#(?<!href=["\'])(?<!">)(?<!\w)(https?://[^\s<>"\'()]+|www\.[^\s<>"\'()]+)#i';
-
-    $text = preg_replace_callback( $url_pattern, function( $matches ) {
-        $url_original_escaped = $matches[0]; // Ya está escapada por esc_html()
-        $url_for_href = html_entity_decode( $url_original_escaped ); // Decodificar para el href
-
-        // Añadir http:// a las URLs que empiezan con www. para el href
-        if ( stripos( $url_for_href, 'www.' ) === 0 ) {
-            $url_for_href = 'http://' . $url_for_href;
-        }
-
-        // Crear el enlace
-        return '<a href="' . esc_url( $url_for_href ) . '" target="_blank" rel="noopener noreferrer">' . $url_original_escaped . '</a>';
-    }, $text );
-
-
-    // 4. Convertir saltos de línea a <br>
-    $text = nl2br( $text );
-
-    return $text;
-}
-
-/**
  * Función auxiliar para realizar peticiones a la API Evolution.
  *
  * @param string $method Método HTTP (GET, POST, DELETE, etc.).
@@ -288,79 +239,111 @@ function crm_evolution_api_request_v2( $endpoint, $data_params = array(), $metho
  * AJAX Handler para obtener la lista de conversaciones recientes para la interfaz de chat.
  */
 function crm_get_recent_conversations_ajax() {
-    //crm_log( 'Recibida petición AJAX: crm_get_recent_conversations' );
-
     // 1. Verificar Nonce y Permisos
     check_ajax_referer( 'crm_evolution_sender_nonce', '_ajax_nonce' );
-    // Usar 'edit_posts' ya que es la capacidad que dimos al menú de chats
     if ( ! current_user_can( 'edit_posts' ) ) {
         wp_send_json_error( array( 'message' => 'No tienes permisos suficientes.' ), 403 );
     }
 
-    // 2. Obtener los últimos mensajes de chat
-    $args = array(
-        'post_type'      => 'crm_chat',
-        'posts_per_page' => -1,
-        'orderby'        => 'date',
-        'order'          => 'DESC',
-        'meta_query'     => array(
-            array(
-                'key'     => '_crm_contact_user_id',
-                'value'   => 0,
-                'compare' => '>',
-                'type'    => 'NUMERIC',
-            ),
-        ),
-    );
-
-    $query = new WP_Query( $args );
-
+    global $wpdb;
     $conversations = array();
-    $processed_user_ids = array();
 
-    // 3. Procesar los mensajes para obtener la última entrada de cada conversación
-    if ( $query->have_posts() ) {
-        //crm_log( "Procesando {$query->post_count} mensajes recientes para obtener conversaciones." );
-        while ( $query->have_posts() ) {
-            $query->the_post();
-            $post_id = get_the_ID();
-            $contact_user_id = get_post_meta( $post_id, '_crm_contact_user_id', true );
+    // Consulta SQL para obtener el último mensaje de cada conversación
+    // Esta consulta asume que _crm_timestamp_wa es numérico o se puede castear a numérico para MAX()
+    // y que _crm_contact_user_id es el ID del usuario WP.
+    $query_sql = $wpdb->prepare( "
+        SELECT
+            p.ID as post_id,
+            p.post_content as last_message_content,
+            pm_user.meta_value as contact_user_id,
+            pm_timestamp.meta_value as last_message_timestamp,
+            pm_instance.meta_value as instance_name,
+            pm_type.meta_value as message_type,
+            pm_caption.meta_value as media_caption,
+            pm_outgoing.meta_value as is_outgoing,
+            pm_group.meta_value as is_group,
+            pm_pushname.meta_value as participant_pushname
+        FROM
+            {$wpdb->posts} p
+        INNER JOIN
+            {$wpdb->postmeta} pm_user ON p.ID = pm_user.post_id AND pm_user.meta_key = '_crm_contact_user_id'
+        INNER JOIN
+            {$wpdb->postmeta} pm_timestamp ON p.ID = pm_timestamp.post_id AND pm_timestamp.meta_key = '_crm_timestamp_wa'
+        LEFT JOIN
+            {$wpdb->postmeta} pm_instance ON p.ID = pm_instance.post_id AND pm_instance.meta_key = '_crm_instance_name'
+        LEFT JOIN
+            {$wpdb->postmeta} pm_type ON p.ID = pm_type.post_id AND pm_type.meta_key = '_crm_message_type'
+        LEFT JOIN
+            {$wpdb->postmeta} pm_caption ON p.ID = pm_caption.post_id AND pm_caption.meta_key = '_crm_media_caption'
+        LEFT JOIN
+            {$wpdb->postmeta} pm_outgoing ON p.ID = pm_outgoing.post_id AND pm_outgoing.meta_key = '_crm_is_outgoing'
+        LEFT JOIN
+            {$wpdb->users} u ON pm_user.meta_value = u.ID
+        LEFT JOIN 
+            {$wpdb->usermeta} pm_group ON u.ID = pm_group.user_id AND pm_group.meta_key = '_crm_is_group'
+        LEFT JOIN
+            {$wpdb->postmeta} pm_pushname ON p.ID = pm_pushname.post_id AND pm_pushname.meta_key = '_crm_pushName'
+        INNER JOIN (
+            SELECT
+                pm_user_inner.meta_value as contact_user_id_inner,
+                MAX(CAST(pm_timestamp_inner.meta_value AS UNSIGNED)) as max_timestamp_inner
+            FROM
+                {$wpdb->postmeta} pm_user_inner
+            INNER JOIN
+                {$wpdb->postmeta} pm_timestamp_inner ON pm_user_inner.post_id = pm_timestamp_inner.post_id
+                                                   AND pm_timestamp_inner.meta_key = '_crm_timestamp_wa'
+            WHERE
+                pm_user_inner.meta_key = '_crm_contact_user_id' AND CAST(pm_user_inner.meta_value AS UNSIGNED) > 0
+            GROUP BY
+                pm_user_inner.meta_value
+        ) as latest_messages
+            ON pm_user.meta_value = latest_messages.contact_user_id_inner
+            AND CAST(pm_timestamp.meta_value AS UNSIGNED) = latest_messages.max_timestamp_inner
+        WHERE
+            p.post_type = %s
+            AND p.post_status = 'publish'
+        ORDER BY
+            latest_messages.max_timestamp_inner DESC
+    ", 'crm_chat' );
 
-            // Si es un ID válido y no hemos procesado ya esta conversación
-            if ( $contact_user_id > 0 && ! in_array( $contact_user_id, $processed_user_ids ) ) {
-                $processed_user_ids[] = $contact_user_id; // Marcar como procesado
+    $results = $wpdb->get_results( $query_sql );
 
-                $user_data = get_userdata( $contact_user_id );
-                if ( $user_data ) {
-                    $last_message_text = get_the_content();
-                    $media_caption = get_post_meta( $post_id, '_crm_media_caption', true );
-                    $message_type = get_post_meta( $post_id, '_crm_message_type', true );
-                    $instance_name = get_post_meta( $post_id, '_crm_instance_name', true );
+    if ( $results ) {
+        foreach ( $results as $row ) {
+            $contact_user_id = (int) $row->contact_user_id;
+            $user_data = get_userdata( $contact_user_id );
 
-                    // Snippet: Usar caption si es media, sino el texto. Añadir prefijo si es media.
-                    $snippet = '';
-                    if ( in_array($message_type, ['image', 'video', 'audio', 'document', 'file']) ) {
-                        $snippet = '[' . ucfirst($message_type) . '] ';
-                        $snippet .= $media_caption ?: '';
-                    } else {
-                        $snippet = $last_message_text;
-                    }
-
-                    $conversations[] = array(
-                        'user_id'      => $contact_user_id,
-                        'display_name' => $user_data->display_name,
-                        'avatar_url'   => get_avatar_url( $contact_user_id, ['size' => 106] ),
-                        'last_message_snippet' => wp_trim_words( $snippet, 10, '...' ),
-                        'last_message_timestamp' => (int) get_post_meta( $post_id, '_crm_timestamp_wa', true ),
-                        'instance_name' => $instance_name ?: 'N/D',
-                    );
+            if ( $user_data ) {
+                $snippet = '';
+                if ( in_array($row->message_type, ['image', 'video', 'audio', 'document', 'file']) ) {
+                    $snippet = '[' . ucfirst($row->message_type) . '] ';
+                    $snippet .= $row->media_caption ?: '';
+                } else {
+                    $snippet = $row->last_message_content;
                 }
+
+                // Si es un mensaje saliente o no es un grupo, el display_name es el del contacto.
+                // Si es un mensaje entrante de un grupo y tenemos pushName, lo usamos para el snippet.
+                $display_name_for_snippet = $user_data->display_name;
+                if ($row->is_group && !(bool)$row->is_outgoing && !empty($row->participant_pushname)) {
+                    // Para mensajes entrantes de grupo, el snippet podría ser "Participante: mensaje"
+                    // Pero para la lista de chats, el nombre principal es el del grupo.
+                    // El snippet del mensaje sí puede reflejar al participante.
+                }
+
+                $conversations[] = array(
+                    'user_id'      => $contact_user_id,
+                    'display_name' => $display_name_for_snippet,
+                    'avatar_url'   => get_avatar_url( $contact_user_id, ['size' => 106] ), // 106px para sidebar
+                    'last_message_snippet' => wp_trim_words( $snippet, 10, '...' ),
+                    'last_message_timestamp' => (int) $row->last_message_timestamp,
+                    'instance_name' => $row->instance_name ?: 'N/D',
+                    'is_group' => (bool) $row->is_group,
+                );
             }
         }
-        wp_reset_postdata();
     }
 
-    //crm_log( "Enviando " . count($conversations) . " conversaciones únicas al frontend.", 'INFO' );
     wp_send_json_success( $conversations );
 }
 add_action( 'wp_ajax_crm_get_recent_conversations', 'crm_get_recent_conversations_ajax' );
@@ -444,6 +427,55 @@ function crm_get_conversation_messages_ajax() {
 }
 add_action( 'wp_ajax_crm_get_conversation_messages', 'crm_get_conversation_messages_ajax' );
 
+/**
+ * Formatea el texto de un mensaje de chat a HTML.
+ * Convierte marcadores de negrita, cursiva, tachado y saltos de línea.
+ *
+ * @param string|null $text El texto a formatear.
+ * @return string El texto formateado como HTML.
+ */
+function crm_format_chat_message_text_to_html( $text ) {
+    if ( empty( $text ) ) {
+        return '';
+    }
+
+    // 1. Escapar HTML para seguridad, excepto para nuestras etiquetas permitidas después.
+    // Los reemplazos de abajo generarán HTML seguro.
+    $text = esc_html( $text );
+
+    // 2. Convertir marcadores a HTML
+    // Negrita: *texto* -> <strong>texto</strong>
+    $text = preg_replace( '/\*(.*?)\*/s', '<strong>$1</strong>', $text );
+    // Cursiva: _texto_ -> <em>texto</em>
+    $text = preg_replace( '/_(.*?)_/s', '<em>$1</em>', $text );
+    // Tachado: ~texto~ -> <s>texto</s>
+    $text = preg_replace( '/~(.*?)~/s', '<s>$1</s>', $text );
+
+    // 3. Convertir URLs a enlaces clickeables
+    // Expresión regular para encontrar URLs (http, https, www)
+    // Se asegura de no estar dentro de un atributo href o después de un >
+    $url_pattern = '#(?<!href=["\'])(?<!">)(?<!\w)(https?://[^\s<>"\'()]+|www\.[^\s<>"\'()]+)#i';
+
+    $text = preg_replace_callback( $url_pattern, function( $matches ) {
+        $url_original_escaped = $matches[0]; // Ya está escapada por esc_html()
+        $url_for_href = html_entity_decode( $url_original_escaped ); // Decodificar para el href
+
+        // Añadir http:// a las URLs que empiezan con www. para el href
+        if ( stripos( $url_for_href, 'www.' ) === 0 ) {
+            $url_for_href = 'http://' . $url_for_href;
+        }
+
+        // Crear el enlace
+        return '<a href="' . esc_url( $url_for_href ) . '" target="_blank" rel="noopener noreferrer">' . $url_original_escaped . '</a>';
+    }, $text );
+
+
+    // 4. Convertir saltos de línea a <br>
+    $text = nl2br( $text );
+
+    return $text;
+}
+
 // =========================================================================
 // == API HEARTBEAT PARA ACTUALIZACIONES DE CHAT ==
 // =========================================================================
@@ -457,118 +489,14 @@ add_action( 'wp_ajax_crm_get_conversation_messages', 'crm_get_conversation_messa
  * @return array La respuesta modificada.
  */
 function crm_handle_heartbeat_request( $response, $data, $screen_id ) {
-    // Solo actuar si estamos en la página correcta
+    // Solo actuar si estamos en la página de historial de chats
     if ( strpos( $screen_id, 'crm-evolution-chat-history' ) === false ) {
         return $response; // Salir si no es la página de chat
     }
-    //crm_log( "Heartbeat: Recibido pulso en pantalla '{$screen_id}'. Datos recibidos:", 'DEBUG', $data ); // Log inicial
 
-    $needs_list_refresh = false;
-    $new_messages_for_open_chat = [];
-
-    // --- 1. Comprobar si hay mensajes nuevos para el chat ABIERTO ---
-    if ( isset( $data['crm_current_open_chat_id'], $data['crm_last_message_timestamp'] ) ) {
-        $open_chat_user_id = absint( $data['crm_current_open_chat_id'] );
-        $last_message_timestamp = absint( $data['crm_last_message_timestamp'] );
-
-        // Determinar si el chat abierto es un grupo
-        $is_open_chat_group = get_user_meta( $open_chat_user_id, '_crm_is_group', true );
-
-        if ( $open_chat_user_id > 0 ) {
-            // //crm_log( "Heartbeat: Chat abierto User ID: {$open_chat_user_id}. Buscando mensajes desde: {$last_message_timestamp}", 'DEBUG' );
-            //crm_log( "Heartbeat: Chat abierto User ID: {$open_chat_user_id}. Buscando mensajes con timestamp > {$last_message_timestamp}", 'DEBUG' );
-
-            $args_open_chat = array(
-                'post_type'      => 'crm_chat',
-                'posts_per_page' => 50, // Limitar por si llegan muchos de golpe
-                'orderby'        => 'meta_value_num',
-                'meta_key'       => '_crm_timestamp_wa',
-                'order'          => 'ASC', // Más antiguo primero para añadirlos en orden
-                'meta_query'     => array(
-                    'relation' => 'AND',
-                    array(
-                        'key'     => '_crm_contact_user_id',
-                        'value'   => $open_chat_user_id,
-                        'compare' => '=',
-                        'type'    => 'NUMERIC',
-                    ),
-                    array(
-                        'key'     => '_crm_timestamp_wa',
-                        'value'   => $last_message_timestamp,
-                        'compare' => '>', // Más reciente que el último mostrado
-                        'type'    => 'NUMERIC',
-                    ),
-                ),
-            );
-            $query_open_chat = new WP_Query( $args_open_chat );
-
-            if ( $query_open_chat->have_posts() ) {
-                //crm_log( "Heartbeat: {$query_open_chat->post_count} mensajes nuevos encontrados para el chat abierto (User ID: {$open_chat_user_id}).", 'INFO' );
-                $needs_list_refresh = true; // Si hay mensajes nuevos en el chat abierto, la lista también necesita refrescarse
-                while ( $query_open_chat->have_posts() ) {
-                    $query_open_chat->the_post();
-                    $post_id = get_the_ID();
-                    $raw_message_content_hb = get_the_content();
-                    $raw_media_caption_hb = get_post_meta( $post_id, '_crm_media_caption', true );
-                    $attachment_id = get_post_meta( $post_id, '_crm_media_attachment_id', true );
-                    $is_outgoing_message = (bool) get_post_meta( $post_id, '_crm_is_outgoing', true );
-                    $participant_pushname_hb = null;
-                    
-                    if ($is_open_chat_group && !$is_outgoing_message) {
-                        $participant_pushname_hb = get_post_meta( $post_id, '_crm_pushName', true );
-                    }
-                    // Formatear igual que en crm_get_conversation_messages_ajax
-                    $new_messages_for_open_chat[] = array(
-                        'id'            => $post_id,
-                        'text'          => crm_format_chat_message_text_to_html( $raw_message_content_hb ),
-                        'timestamp'     => (int) get_post_meta( $post_id, '_crm_timestamp_wa', true ),
-                        'is_outgoing'   => $is_outgoing_message,
-                        'type'          => get_post_meta( $post_id, '_crm_message_type', true ),
-                        'caption'       => crm_format_chat_message_text_to_html( $raw_media_caption_hb ),
-                        'attachment_id' => $attachment_id ? (int) $attachment_id : null,
-                        'attachment_url'=> $attachment_id ? wp_get_attachment_url( $attachment_id ) : null,
-                        'participant_pushname' => $participant_pushname_hb,
-                    );
-                }
-                wp_reset_postdata();
-                $response['crm_new_messages_for_open_chat'] = $new_messages_for_open_chat;
-            }
-        }
-    }
-
-    // --- 2. Comprobar si hay CUALQUIER mensaje nuevo desde el último chequeo GENERAL ---
-    //    (Hacer esto incluso si ya encontramos mensajes para el chat abierto, para asegurar que el flag general se ponga)
-    if ( isset( $data['crm_last_chat_check'] ) && !$needs_list_refresh ) { // Solo si no lo marcamos ya
-        $last_check_timestamp = absint( $data['crm_last_chat_check'] );
-        //crm_log( "Heartbeat: Chequeo general. Buscando mensajes desde: {$last_check_timestamp}", 'DEBUG' );
-        $args_general = array(
-            'post_type'      => 'crm_chat',
-            'posts_per_page' => 1,
-            'orderby'        => 'meta_value_num',
-            'meta_key'       => '_crm_timestamp_wa',
-            'order'          => 'DESC',
-            'meta_query'     => array(
-                array(
-                    'key'     => '_crm_timestamp_wa',
-                    'value'   => $last_check_timestamp,
-                    'compare' => '>',
-                    'type'    => 'NUMERIC',
-                ),
-            ),
-            'fields' => 'ids', // Solo necesitamos los IDs
-        );
-        $query_general = new WP_Query( $args_general );
-
-        if ( $query_general->have_posts() ) {
-            //crm_log( "Heartbeat: Detectados mensajes nuevos generales desde {$last_check_timestamp}.", 'INFO' );
-            $needs_list_refresh = true;
-        }
-    }
-
-    // --- 3. Añadir el flag de refresco general si es necesario ---
-    if ($needs_list_refresh) {
-        $response['crm_needs_list_refresh'] = true;
-    }
+    // Ya no procesamos crm_current_open_chat_id, crm_last_message_timestamp, ni crm_last_chat_check
+    // para las actualizaciones del chat, ya que Socket.IO se encarga de esto.
+    // error_log( "[Heartbeat PHP - CRM Chat] Recibido pulso en '{$screen_id}'. Ya no se procesan datos de chat aquí debido a Socket.IO." );
 
     return $response;
 }
@@ -682,10 +610,6 @@ add_action( 'wp_ajax_crm_send_message_ajax', 'crm_send_message_ajax' );
 
 /**
  * Envía un mensaje de texto a un usuario WP usando la API Evolution.
- *
- * @param int $user_id ID del usuario WP destinatario.
- * @param string $message_text Texto del mensaje a enviar.
- * @return array|WP_Error Respuesta de la API o WP_Error.
  */
 function crm_send_whatsapp_message( $user_id, $message_text ) {
     //crm_log( "Intentando enviar mensaje a User ID: {$user_id}", 'INFO' );
@@ -697,28 +621,39 @@ function crm_send_whatsapp_message( $user_id, $message_text ) {
         return new WP_Error( 'jid_not_found', 'No se encontró el número de WhatsApp (JID) para este usuario.' );
     }
 
-    // 2. Encontrar una instancia activa para enviar
-    $active_instance_name = null;
+    // 2. Obtener la instancia específica del contacto
+    $instance_name_contact = get_user_meta( $user_id, '_crm_instance_name', true );
+
+    if ( empty( $instance_name_contact ) ) {
+        return new WP_Error( 'instance_not_defined_for_contact', 'Este contacto no tiene una instancia de envío configurada.' );
+    }
+
+    // 3. Verificar el estado de la instancia específica del contacto
+    $is_contact_instance_active = false;
     $instances_response = crm_evolution_api_request( 'GET', '/instance/fetchInstances' );
+
     if ( !is_wp_error( $instances_response ) && is_array( $instances_response ) ) {
         foreach ( $instances_response as $instance ) {
-            $status = isset($instance['instance']['status']) ? $instance['instance']['status'] : 'unknown';
-            // Usar la primera instancia conectada que encuentre
-            if ( ($status === 'open' || $status === 'connected' || $status === 'connection') && isset($instance['instance']['instanceName']) ) {
-                $active_instance_name = $instance['instance']['instanceName'];
-                //crm_log( "Usando instancia activa '{$active_instance_name}' para enviar.", 'INFO' );
+            if ( isset($instance['instance']['instanceName']) && $instance['instance']['instanceName'] === $instance_name_contact ) {
+                $status = isset($instance['instance']['status']) ? $instance['instance']['status'] : 'unknown';
+                if ( in_array($status, ['open', 'connected', 'connection']) ) {
+                    $is_contact_instance_active = true;
+                } else { 
+
+                }
                 break;
             }
         }
+    } elseif (is_wp_error( $instances_response )) {
+        return new WP_Error( 'fetch_instances_failed', 'Error al obtener el estado de las instancias: ' . $instances_response->get_error_message() );
     }
 
-    if ( empty( $active_instance_name ) ) {
-        //crm_log( "Error: No se encontró ninguna instancia activa para enviar el mensaje.", 'ERROR' );
-        return new WP_Error( 'no_active_instance', 'No hay ninguna instancia de WhatsApp conectada para enviar el mensaje.' );
+    if ( !$is_contact_instance_active ) {
+        return new WP_Error( 'contact_instance_not_active', "La instancia '{$instance_name_contact}' asociada a este contacto no está conectada o no se encuentra." );
     }
 
-    // 3. Preparar datos para la API Evolution (/message/sendText)
-    $endpoint = "/message/sendText/{$active_instance_name}";
+    // 4. Preparar datos para la API Evolution (/message/sendText) usando la instancia del contacto
+    $endpoint = "/message/sendText/{$instance_name_contact}";
     $body = array(
         'number'        => $recipient_jid,
         'options'       => array( 'delay' => 1200, 'presence' => 'composing' ), // Delay y simular escritura
@@ -730,16 +665,11 @@ function crm_send_whatsapp_message( $user_id, $message_text ) {
 
     // 5. Si la llamada a la API fue exitosa, guardar el mensaje saliente en la BD
     if ( ! is_wp_error( $api_response ) ) {
-        //crm_log( "Guardado DB: API OK. Preparando datos para guardar mensaje saliente User ID {$user_id}.", 'DEBUG' ); // <-- Log 1
-        //crm_log( "Llamada API para enviar mensaje a User ID {$user_id} exitosa (a nivel conexión). Guardando mensaje saliente...", 'INFO', $api_response );
-
-        // Intentar obtener el ID del mensaje de la respuesta de la API (esto depende de la estructura de respuesta de Evolution API)
-        // Ajusta ['key', 'id'] según la respuesta real. Si no existe, será null.
         $whatsapp_message_id = isset( $api_response['key']['id'] ) ? sanitize_text_field( $api_response['key']['id'] ) : null;
 
         $message_data = array(
             'user_id'             => $user_id,
-            'instance_name'       => $active_instance_name,
+            'instance_name'       => $instance_name_contact, // Usar la instancia del contacto
             'message_text'        => $message_text,
             'timestamp'           => time(), // Usar timestamp actual del servidor
             'is_outgoing'         => true,
@@ -749,11 +679,7 @@ function crm_send_whatsapp_message( $user_id, $message_text ) {
             'caption'             => null,
         );
 
-        //crm_log( "Guardado DB: Datos preparados (\$message_data): " . print_r($message_data, true), 'DEBUG' ); // <-- Log 2
-        $meta_input_prepared = crm_prepare_chat_message_meta( $message_data ); // Usar función helper si existe, o mapear aquí
-        //crm_log( "Guardado DB: Meta Input preparado: " . print_r($meta_input_prepared, true), 'DEBUG' ); // <-- Log 3
-        // Llamar a la función que guarda el post (podríamos crear una función helper crm_save_chat_message)
-        // Por ahora, insertamos directamente adaptando la lógica del webhook
+        $meta_input_prepared = crm_prepare_chat_message_meta( $message_data );
         $post_id = wp_insert_post( array(
             'post_type'   => 'crm_chat',
             'post_status' => 'publish', // Publicar inmediatamente
@@ -763,8 +689,7 @@ function crm_send_whatsapp_message( $user_id, $message_text ) {
         ) );
 
         if ( is_wp_error( $post_id ) ) {
-            //crm_log( "Error al guardar el mensaje saliente en la BD para User ID {$user_id}.", 'ERROR', $post_id->get_error_message() );
-            // No devolvemos error al frontend necesariamente, el mensaje se envió. Solo logueamos.
+
         } else {
             // Construir el objeto del mensaje para el frontend
             $message_for_frontend = array(
@@ -777,20 +702,132 @@ function crm_send_whatsapp_message( $user_id, $message_text ) {
                 'attachment_id' => null,
                 'attachment_url'=> null,
             );
-            //crm_log( "Mensaje saliente guardado en BD con Post ID: {$post_id}", 'INFO' );
-            // Devolver tanto la respuesta de la API como los datos del mensaje guardado
+
             return array(
                 'api_response' => $api_response,
                 'sent_message_data' => $message_for_frontend
             );
         }
     } else {
-         //crm_log( "Llamada API para enviar mensaje a User ID {$user_id} falló.", 'WARN', $api_response->get_error_message() );
+
+    }
+
+    return $api_response;
+}
+
+/**
+ * Envía un mensaje multimedia a un usuario WP usando la API Evolution.
+ */
+function crm_send_whatsapp_media_message( $user_id, $attachment_url, $mime_type, $filename, $caption, $wp_attachment_id = null ) {
+
+    // 1. Obtener JID del destinatario (igual que para texto)
+    $recipient_jid = get_user_meta( $user_id, '_crm_whatsapp_jid', true );
+    if ( empty( $recipient_jid ) ) {
+        return new WP_Error( 'jid_not_found', 'No se encontró el número de WhatsApp (JID) para este usuario.' );
+    }
+
+    // 2. Obtener la instancia específica del contacto
+    $instance_name_contact = get_user_meta( $user_id, '_crm_instance_name', true );
+
+    if ( empty( $instance_name_contact ) ) {
+        return new WP_Error( 'instance_not_defined_for_contact_media', 'Este contacto no tiene una instancia de envío configurada para multimedia.' );
+    }
+
+    // 3. Verificar el estado de la instancia específica del contacto
+    $is_contact_instance_active = false;
+    $instances_response = crm_evolution_api_request( 'GET', '/instance/fetchInstances' );
+
+    if ( !is_wp_error( $instances_response ) && is_array( $instances_response ) ) {
+        foreach ( $instances_response as $instance ) {
+            if ( isset($instance['instance']['instanceName']) && $instance['instance']['instanceName'] === $instance_name_contact ) {
+                $status = isset($instance['instance']['status']) ? $instance['instance']['status'] : 'unknown';
+                if ( in_array($status, ['open', 'connected', 'connection']) ) {
+                    $is_contact_instance_active = true;
+                 
+                } else {
+                   
+                }
+                break;
+            }
+        }
+    } elseif (is_wp_error( $instances_response )) {
+        return new WP_Error( 'fetch_instances_failed_media', 'Error al obtener el estado de las instancias para multimedia: ' . $instances_response->get_error_message() );
+    }
+
+    if ( !$is_contact_instance_active ) {
+        return new WP_Error( 'contact_instance_not_active_media', "La instancia '{$instance_name_contact}' asociada a este contacto no está conectada o no se encuentra para enviar multimedia." );
+    }
+
+    // 4. Determinar el tipo de media para la API Evolution
+    $media_type = 'document'; // Tipo por defecto
+    if ( strpos( $mime_type, 'image/' ) === 0 ) $media_type = 'image';
+    elseif ( strpos( $mime_type, 'video/' ) === 0 ) $media_type = 'video';
+    elseif ( strpos( $mime_type, 'audio/' ) === 0 ) $media_type = 'audio';
+
+    // 4. Preparar datos para la API Evolution (/message/sendMedia)
+    // Usar la instancia específica del contacto
+    $endpoint = "/message/sendMedia/{$instance_name_contact}";
+    $body = array(
+        'number'        => $recipient_jid,
+        'options'       => array( 'delay' => 1200, 'presence' => 'composing' ), // Simular subida
+        'mediaMessage'  => array(
+            'mediatype' => $media_type, // Corregido a minúsculas
+            'media'     => $attachment_url, // Corregido de 'url' a 'media'
+            'caption'   => $caption, // Puede ser vacío
+            'fileName'  => $filename ?: basename( $attachment_url ), // 'fileName' con 'N' mayúscula
+        ),
+    );
+    error_log( 'Api'.$endpoint);
+    error_log( 'Datos'.wp_json_encode($body) );
+    // 5. Llamar a la API
+    $api_response = crm_evolution_api_request( 'POST', $endpoint, $body );
+
+    // 6. Si la llamada a la API fue exitosa
+    if ( ! is_wp_error( $api_response ) ) {
+        $whatsapp_message_id = isset( $api_response['key']['id'] ) ? sanitize_text_field( $api_response['key']['id'] ) : null;
+        $message_data = array(
+            'user_id'             => $user_id,
+            'instance_name'       => $instance_name_contact, // Usar la instancia del contacto
+            'message_text'        => null, // No hay texto principal, solo caption
+            'timestamp'           => time(),
+            'is_outgoing'         => true,
+            'message_type'        => $media_type, // Usar el tipo detectado
+            'whatsapp_message_id' => $whatsapp_message_id,
+            'attachment_url'      => $attachment_url, // Guardar URL
+            'caption'             => $caption,        // Guardar caption
+            'wp_attachment_id'    => $wp_attachment_id, // Guardar el ID del adjunto de WP
+        );
+        $post_id = wp_insert_post( array(
+            'post_type'   => 'crm_chat',
+            'post_status' => 'publish',
+            'post_title'  => 'Mensaje Multimedia Saliente - ' . $user_id . ' - ' . time(),
+            'meta_input'  => crm_prepare_chat_message_meta( $message_data ),
+        ) );
+        if ( is_wp_error( $post_id ) ) {
+            
+        } else {
+            // Construir el objeto del mensaje para el frontend
+            // Para multimedia saliente, el 'attachment_id' local podría no ser relevante si solo se envía la URL.
+            // El frontend usará 'attachment_url' directamente para la vista previa optimista.
+            $message_for_frontend = array(
+                'id'            => $post_id,
+                'text'          => crm_format_chat_message_text_to_html( null ), // Formatear aunque sea null
+                'timestamp'     => $message_data['timestamp'], // Usar el timestamp que se guardó
+                'is_outgoing'   => true,
+                'type'          => $media_type, // El tipo de media detectado (image, video, etc.)
+                'caption'       => crm_format_chat_message_text_to_html( $caption ),
+                'attachment_id' => $wp_attachment_id ? (int) $wp_attachment_id : null, // Usar el ID de WP si está disponible
+                'attachment_url'=> $attachment_url, // La URL que se envió a la API
+            );
+            return array(
+                'api_response' => $api_response,
+                'sent_message_data' => $message_for_frontend
+            );
+        }
     }
     // Si la API falló o el guardado en BD falló (y no retornamos antes), devolver solo la respuesta de la API (o error)
     return $api_response;
 }
-
 
 /**
  * Prepara el array de metadatos para guardar un post 'crm_chat'.
@@ -804,28 +841,17 @@ function crm_prepare_chat_message_meta( $data ) {
     // Mapear los datos a las claves meta correctas
     if ( isset( $data['user_id'] ) ) $meta_input['_crm_contact_user_id'] = absint( $data['user_id'] );
     if ( isset( $data['instance_name'] ) ) $meta_input['_crm_instance_name'] = sanitize_text_field( $data['instance_name'] );
-    // Asumiendo que sender/recipient JIDs también son relevantes para mensajes salientes desde el plugin
-    // Para un mensaje saliente, el sender es la instancia y el recipient es el contacto
-    // Necesitamos obtener el JID de la instancia (no lo tenemos en $data ahora mismo)
-    // y el JID del contacto (sí lo tenemos). Ajustaremos esto si es necesario.
-    // Por ahora, guardamos lo que tenemos:
-    // if ( isset( $data['sender_jid'] ) ) $meta_input['_crm_sender_jid'] = sanitize_text_field( $data['sender_jid'] );
-    // if ( isset( $data['recipient_jid'] ) ) $meta_input['_crm_recipient_jid'] = sanitize_text_field( $data['recipient_jid'] );
     if ( isset( $data['is_outgoing'] ) ) $meta_input['_crm_is_outgoing'] = (bool) $data['is_outgoing'];
     if ( isset( $data['whatsapp_message_id'] ) ) $meta_input['_crm_message_id_wa'] = sanitize_text_field( $data['whatsapp_message_id'] );
     if ( isset( $data['timestamp'] ) ) $meta_input['_crm_timestamp_wa'] = absint( $data['timestamp'] );
     if ( isset( $data['message_type'] ) ) $meta_input['_crm_message_type'] = sanitize_text_field( $data['message_type'] );
     if ( isset( $data['attachment_url'] ) ) $meta_input['_crm_attachment_url'] = esc_url_raw( $data['attachment_url'] ); // Guardar URL adjunto
-    if ( isset( $data['caption'] ) ) $meta_input['_crm_caption'] = sanitize_textarea_field( $data['caption'] );       // Guardar caption
-    // Añadir más campos si son necesarios (ej: _crm_is_group_message, _crm_participant_jid)
-
+    if ( isset( $data['caption'] ) ) $meta_input['_crm_caption'] = sanitize_textarea_field( $data['caption'] );
+    if ( isset( $data['wp_attachment_id'] ) && !empty( $data['wp_attachment_id'] ) ) {
+        $meta_input['_crm_media_attachment_id'] = absint( $data['wp_attachment_id'] );
+    }
     return $meta_input;
 }
-
-
-// =========================================================================
-// == MANEJADORES AJAX - ENVÍO DE MULTIMEDIA ==
-// =========================================================================
 
 /**
  * AJAX Handler para enviar un mensaje multimedia.
@@ -846,6 +872,7 @@ function crm_send_media_message_ajax() {
     $mime_type      = isset( $_POST['mime_type'] ) ? sanitize_mime_type( wp_unslash( $_POST['mime_type'] ) ) : '';
     $filename       = isset( $_POST['filename'] ) ? sanitize_file_name( wp_unslash( $_POST['filename'] ) ) : '';
     $caption        = isset( $_POST['caption'] ) ? sanitize_textarea_field( wp_unslash( $_POST['caption'] ) ) : ''; // El texto del input es el caption
+    $wp_attachment_id = isset( $_POST['attachment_id'] ) ? absint( $_POST['attachment_id'] ) : null; // Obtener el ID del adjunto de WP
 
     // 3. Validar datos
     if ( $user_id <= 0 || empty( $attachment_url ) || empty( $mime_type ) ) {
@@ -854,7 +881,7 @@ function crm_send_media_message_ajax() {
     }
 
     // 4. Llamar a la función que realmente envía el mensaje multimedia
-    $result = crm_send_whatsapp_media_message( $user_id, $attachment_url, $mime_type, $filename, $caption );
+    $result = crm_send_whatsapp_media_message( $user_id, $attachment_url, $mime_type, $filename, $caption, $wp_attachment_id );
 
     // 5. Enviar respuesta
     if ( is_wp_error( $result ) ) {
@@ -871,117 +898,7 @@ function crm_send_media_message_ajax() {
         }
     }
 }
-add_action( 'wp_ajax_crm_send_media_message_ajax', 'crm_send_media_message_ajax' ); // <-- Registrar la acción
-
-/**
- * Envía un mensaje multimedia a un usuario WP usando la API Evolution.
- *
- * @param int    $user_id        ID del usuario WP destinatario.
- * @param string $attachment_url URL del archivo adjunto.
- * @param string $mime_type      Tipo MIME del archivo.
- * @param string $filename       Nombre original del archivo (opcional).
- * @param string $caption        Texto que acompaña al archivo (opcional).
- * @return array|WP_Error Respuesta de la API o WP_Error.
- */
-function crm_send_whatsapp_media_message( $user_id, $attachment_url, $mime_type, $filename, $caption ) {
-    //crm_log( "Intentando enviar multimedia a User ID: {$user_id}", 'INFO', compact('attachment_url', 'mime_type', 'filename', 'caption') );
-
-    // 1. Obtener JID del destinatario (igual que para texto)
-    $recipient_jid = get_user_meta( $user_id, '_crm_whatsapp_jid', true );
-    if ( empty( $recipient_jid ) ) {
-        return new WP_Error( 'jid_not_found', 'No se encontró el número de WhatsApp (JID) para este usuario.' );
-    }
-
-    // 2. Encontrar una instancia activa (igual que para texto)
-    $active_instance_name = null;
-    // (Reutilizar la lógica de crm_send_whatsapp_message o extraerla a una función helper si prefieres)
-    $instances_response = crm_evolution_api_request( 'GET', '/instance/fetchInstances' );
-    if ( !is_wp_error( $instances_response ) && is_array( $instances_response ) ) {
-        foreach ( $instances_response as $instance ) {
-            $status = isset($instance['instance']['status']) ? $instance['instance']['status'] : 'unknown';
-            if ( ($status === 'open' || $status === 'connected' || $status === 'connection') && isset($instance['instance']['instanceName']) ) {
-                $active_instance_name = $instance['instance']['instanceName'];
-                break;
-            }
-        }
-    }
-    if ( empty( $active_instance_name ) ) {
-        return new WP_Error( 'no_active_instance', 'No hay ninguna instancia de WhatsApp conectada para enviar el mensaje.' );
-    }
-
-    // 3. Determinar el tipo de media para la API Evolution
-    $media_type = 'document'; // Tipo por defecto
-    if ( strpos( $mime_type, 'image/' ) === 0 ) $media_type = 'image';
-    elseif ( strpos( $mime_type, 'video/' ) === 0 ) $media_type = 'video';
-    elseif ( strpos( $mime_type, 'audio/' ) === 0 ) $media_type = 'audio';
-
-    // 4. Preparar datos para la API Evolution (/message/sendMedia)
-    $endpoint = "/message/sendMedia/{$active_instance_name}";
-    $body = array(
-        'number'        => $recipient_jid,
-        'options'       => array( 'delay' => 1200, 'presence' => 'composing' ), // Simular subida
-        'mediaMessage'  => array(
-            'mediatype' => $media_type, // Corregido a minúsculas
-            'media'     => $attachment_url, // Corregido de 'url' a 'media'
-            'caption'   => $caption, // Puede ser vacío
-            'fileName'  => $filename ?: basename( $attachment_url ), // 'fileName' con 'N' mayúscula
-        ),
-    );
-    error_log( 'Api'.$endpoint);
-    error_log( 'Datos'.wp_json_encode($body) );
-    // 5. Llamar a la API
-    $api_response = crm_evolution_api_request( 'POST', $endpoint, $body );
-
-    // 6. Si la llamada a la API fue exitosa, guardar el mensaje saliente en la BD (¡IMPLEMENTACIÓN PENDIENTE!)
-    if ( ! is_wp_error( $api_response ) ) {
-        //crm_log( "Llamada API para enviar multimedia a User ID {$user_id} exitosa. Guardando mensaje...", 'INFO' );
-        // --- INICIO: Guardar mensaje multimedia en BD (Adaptar de crm_send_whatsapp_message) ---
-        $whatsapp_message_id = isset( $api_response['key']['id'] ) ? sanitize_text_field( $api_response['key']['id'] ) : null;
-        $message_data = array(
-            'user_id'             => $user_id,
-            'instance_name'       => $active_instance_name,
-            'message_text'        => null, // No hay texto principal, solo caption
-            'timestamp'           => time(),
-            'is_outgoing'         => true,
-            'message_type'        => $media_type, // Usar el tipo detectado
-            'whatsapp_message_id' => $whatsapp_message_id,
-            'attachment_url'      => $attachment_url, // Guardar URL
-            'caption'             => $caption,        // Guardar caption
-        );
-        $post_id = wp_insert_post( array(
-            'post_type'   => 'crm_chat',
-            'post_status' => 'publish',
-            'post_title'  => 'Mensaje Multimedia Saliente - ' . $user_id . ' - ' . time(),
-            'meta_input'  => crm_prepare_chat_message_meta( $message_data ), // Asegúrate que esta función maneje attachment_url y caption
-        ) );
-        if ( is_wp_error( $post_id ) ) {
-            //crm_log( "Error al guardar el mensaje multimedia saliente en la BD para User ID {$user_id}.", 'ERROR', $post_id->get_error_message() );
-        } else {
-            // Construir el objeto del mensaje para el frontend
-            // Para multimedia saliente, el 'attachment_id' local podría no ser relevante si solo se envía la URL.
-            // El frontend usará 'attachment_url' directamente para la vista previa optimista.
-            $message_for_frontend = array(
-                'id'            => $post_id,
-                'text'          => crm_format_chat_message_text_to_html( null ), // Formatear aunque sea null
-                'timestamp'     => $message_data['timestamp'], // Usar el timestamp que se guardó
-                'is_outgoing'   => true,
-                'type'          => $media_type, // El tipo de media detectado (image, video, etc.)
-                'caption'       => crm_format_chat_message_text_to_html( $caption ),
-                'attachment_id' => null, // No tenemos un ID de adjunto local en este flujo
-                'attachment_url'=> $attachment_url, // La URL que se envió a la API
-            );
-            //crm_log( "Mensaje multimedia saliente guardado en BD con Post ID: {$post_id}", 'INFO' );
-            // Devolver tanto la respuesta de la API como los datos del mensaje guardado
-            return array(
-                'api_response' => $api_response,
-                'sent_message_data' => $message_for_frontend
-            );
-        }
-        // --- FIN: Guardar mensaje multimedia en BD ---
-    }
-    // Si la API falló o el guardado en BD falló (y no retornamos antes), devolver solo la respuesta de la API (o error)
-    return $api_response;
-}
+add_action( 'wp_ajax_crm_send_media_message_ajax', 'crm_send_media_message_ajax' );
 
 /**
  * Permite la subida de archivos OGG (audio) a la biblioteca de medios.
@@ -1132,7 +1049,6 @@ function crm_get_contact_details_callback() {
     //crm_log( "Enviando detalles del contacto User ID: {$user_id} al frontend.", 'INFO' );
     wp_send_json_success( $contact_details );
 }
-
 add_action( 'wp_ajax_crm_get_contact_details', 'crm_get_contact_details_callback' );
 
 /**
@@ -1275,11 +1191,6 @@ function crm_get_wordpress_roles_callback() {
     wp_send_json_success( $roles_for_select );
 }
 add_action( 'wp_ajax_crm_get_wordpress_roles', 'crm_get_wordpress_roles_callback' );
-
-
-// =========================================================================
-// == MANEJADOR AJAX - ACTUALIZAR AVATAR DEL CONTACTO ==
-// =========================================================================
 
 /**
  * AJAX Handler para actualizar la foto de perfil (avatar) de un contacto.
@@ -1497,10 +1408,6 @@ function crm_external_send_whatsapp_message( $recipient_identifier, $message_con
 /**
  * Procesa un número de teléfono: busca en todas las instancias activas,
  * obtiene el perfil de WhatsApp, y luego crea o actualiza el usuario en WordPress.
- * Siempre actualiza el _crm_instance_name del usuario WP con la instancia que encontró el perfil.
- *
- * @param string $phone_number_from_ui Número de teléfono (con prefijo) ingresado por el usuario.
- * @return int|WP_Error El ID del usuario de WordPress (nuevo o actualizado) o un WP_Error en caso de fallo.
  */
 function crm_process_whatsapp_contact_by_phone($phone_number_from_ui) {
     if (empty($phone_number_from_ui)) {
@@ -1747,11 +1654,6 @@ function crm_process_whatsapp_contact_by_phone($phone_number_from_ui) {
 function crm_fetch_whatsapp_profile_ajax_callback() {
     check_ajax_referer('crm_evolution_sender_nonce', '_ajax_nonce'); 
 
-    // if (!current_user_can('edit_posts')) { 
-    //     wp_send_json_error(['message' => 'No tienes permisos para realizar esta acción.'], 403);
-    //     return;
-    // }
-
     $phone_number = isset($_POST['phone_number']) ? sanitize_text_field(wp_unslash($_POST['phone_number'])) : '';
 
     if (empty($phone_number)) {
@@ -1841,12 +1743,6 @@ function crm_get_all_evolution_instances_ajax_callback() {
     wp_send_json_success($instances_decoded_body);
 }
 add_action('wp_ajax_crm_get_all_evolution_instances_ajax', 'crm_get_all_evolution_instances_ajax_callback');
-
-
-// =========================================================================
-// == MANEJADOR AJAX - MARCAR/DESMARCAR FAVORITO ==
-// =========================================================================
-
 /**
  * AJAX Handler para marcar o desmarcar un contacto como favorito.
  */
@@ -1884,11 +1780,6 @@ function crm_toggle_favorite_contact_ajax_callback() {
     }
 }
 add_action( 'wp_ajax_crm_toggle_favorite_contact', 'crm_toggle_favorite_contact_ajax_callback' );
-
-
-// =========================================================================
-// == MANEJADOR AJAX - ELIMINAR CONTACTO O GRUPO ==
-// =========================================================================
 
 /**
  * AJAX Handler para eliminar un contacto (usuario WP) o un grupo (representado como usuario WP).

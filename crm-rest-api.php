@@ -150,7 +150,62 @@ function crm_evolution_webhook_handler_callback( WP_REST_Request $request ) {
                 if (is_wp_error($save_result)) {
                     error_log("[Webhook][{$instance}][messages.upsert] Error al guardar mensaje WA ID {$message_id_wa}: " . $save_result->get_error_message());
                 } else {
-                    error_log("[Webhook][{$instance}][messages.upsert] Mensaje WA ID {$message_id_wa} guardado con éxito. Post ID: {$save_result}");
+                    // +++ INICIO: Notificación al Servidor Socket.IO +++
+                    $log_socket_prefix = "[Webhook][{$instance_name}][SocketIO]";
+                    error_log("{$log_socket_prefix} Mensaje guardado (Post ID: {$save_result}). Preparando datos para emitir vía Socket.IO.");
+
+                    // Preparar datos para emitir
+                    // Necesitamos crm_format_chat_message_text_to_html, asegurémonos que está disponible
+                    // o la incluimos/movemos a un archivo de utilidades. Por ahora, asumimos que está.
+                    // Si crm-ajax-handlers.php no está siempre incluido, esta función podría no estar disponible.
+                    // Considerar mover crm_format_chat_message_text_to_html a un archivo de utilidades si es necesario.
+                    $formatted_text = function_exists('crm_format_chat_message_text_to_html') ? crm_format_chat_message_text_to_html($message_text) : $message_text;
+                    $formatted_caption = function_exists('crm_format_chat_message_text_to_html') ? crm_format_chat_message_text_to_html($media_caption) : $media_caption;
+                    
+                    $attachment_post_id = get_post_meta($save_result, '_crm_media_attachment_id', true);
+                    $attachment_url_for_socket = $attachment_post_id ? wp_get_attachment_url($attachment_post_id) : null;
+
+                    $socket_payload = array(
+                        'roomName'    => 'wordpress_crm_updates', // La sala a la que se unen los clientes del CRM
+                        'eventName'   => 'new_crm_message',       // El evento que escucha el cliente JS
+                        'dataToEmit'  => array(
+                            'id'            => $save_result, // ID del post del mensaje guardado
+                            'contactUserId' => $contact_user_id,
+                            'instanceName'  => $instance_name,
+                            'text'          => $formatted_text,
+                            'timestamp'     => $timestamp_wa,
+                            'is_outgoing'   => $from_me,
+                            'type'          => $message_type,
+                            'caption'       => $formatted_caption,
+                            'attachment_id' => $attachment_post_id ? (int) $attachment_post_id : null,
+                            'attachment_url'=> $attachment_url_for_socket,
+                            'participant_pushname' => ($is_group_chat && !$from_me) ? $pushname : null,
+                        ),
+                        'clientId'    => 'crm_evolution_webhook'
+                    );
+
+                    $socket_server_url = 'https://socket.iptvbolivia.com/api/emit'; // URL del servidor Socket.IO genérico
+
+                    $args_socket = array(
+                        'body'        => wp_json_encode( $socket_payload ),
+                        'headers'     => array(
+                            'Content-Type' => 'application/json',
+                        ),
+                        'timeout'     => 15,
+                        'sslverify'   => true, // Dejar en true para producción
+                    );
+
+                    error_log("{$log_socket_prefix} Enviando a {$socket_server_url}. Payload: " . wp_json_encode($socket_payload));
+                    $socket_response = wp_remote_post( $socket_server_url, $args_socket );
+
+                    if ( is_wp_error( $socket_response ) ) {
+                        error_log("{$log_socket_prefix} Error en wp_remote_post: " . $socket_response->get_error_message());
+                    } else {
+                        $socket_response_code = wp_remote_retrieve_response_code( $socket_response );
+                        $socket_response_body = wp_remote_retrieve_body( $socket_response );
+                        error_log("{$log_socket_prefix} Respuesta del servidor Socket.IO ({$socket_response_code}): " . $socket_response_body);
+                    }
+                    // +++ FIN: Notificación al Servidor Socket.IO +++
                 }
             } else {
                  error_log("[Webhook][{$instance}][messages.upsert] Mensaje WA ID {$message_id_wa} ignorado (tipo desconocido y sin adjunto).");

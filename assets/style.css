@@ -465,10 +465,13 @@
     border-radius: 18px; /* Bordes redondeados */
     padding: 8px 12px;
     border: 1px solid #dcdcdc;
-    resize: none; /* Evitar que se pueda redimensionar */
-    max-height: 100px; /* Limitar altura máxima si crece */
+    resize: none; /* Importante: Evitar que se pueda redimensionar manualmente */
     margin-right: 10px;
     line-height: 1.4;
+    min-height: 38px; /* Altura mínima (aprox. 1 línea con padding) */
+    max-height: 150px; /* Altura máxima antes de que aparezca el scroll (igual que en JS) */
+    overflow-y: hidden; /* Inicialmente oculto, JS lo cambiará a scroll si es necesario */
+    box-sizing: border-box; /* Para un mejor control del tamaño con padding y borde */
 }
 
 .crm-chat-history-page .chat-input-area .btn-send {
